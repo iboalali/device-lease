@@ -31,6 +31,10 @@ def set_thread(path: Path, thread: str, column: str, value: str | None) -> None:
     db.close()
 
 
+def add_agent_device_session(db_path: Path, session: str) -> None:
+    (db_path.parent / "device" / "agent-device" / "sessions" / session).mkdir(parents=True)
+
+
 def install_agent_device(db_path: Path) -> Path:
     """Creates a fake agent-device launcher and host config next to the fake database. Returns
     the file each launcher call appends its arguments to."""

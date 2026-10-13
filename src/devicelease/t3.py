@@ -114,8 +114,9 @@ def close_agent_device(thread_id: str, device_ids: list[str], log_path: Path) ->
 
     T3 Code's device_close only removes the Device panel, and agent-device keeps its own hold on
     the device until its session is closed. The deviceId T3 Code hashed is not known for certain
-    (the ID passed to device_open, or the device's serial), so every candidate is closed; closing a
-    session that does not exist does nothing.
+    (the ID passed to device_open, or the device's serial), so every candidate is tried. A session
+    only exists once an agent-device command ran in it, and closing a missing one still leaves an
+    empty session folder and a diagnostics log, so candidates without a session folder are skipped.
     """
     device_dir = db_path().parent / "device"
     launcher = device_dir / "bin" / "agent-device"
@@ -123,9 +124,15 @@ def close_agent_device(thread_id: str, device_ids: list[str], log_path: Path) ->
     if not launcher.is_file() or not config.is_file():
         return
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    sessions = [
+        (device_id, agent_device_session(thread_id, device_id))
+        for device_id in dict.fromkeys(device_ids)
+    ]
+    sessions = [(d, s) for d, s in sessions if (device_dir / "agent-device" / "sessions" / s).is_dir()]
+    if not sessions:
+        return
     with open(log_path, "a") as log:
-        for device_id in dict.fromkeys(device_ids):
-            session = agent_device_session(thread_id, device_id)
+        for device_id, session in sessions:
             log.write(f"close {session} (thread {thread_id}, device {device_id})\n")
             log.flush()
             try:

@@ -145,6 +145,7 @@ class Lease:
             raise LeaseError(f"--boot only applies to emulators; {device.id} is a physical device")
 
         online = self.online_ids()
+        replaced = None
         with self.store.lock():
             existing = self.store.read(device.id)
             if existing and self.is_mine(existing):
@@ -157,10 +158,13 @@ class Lease:
                     if not stale_reason(existing, self.expiry, online):
                         raise LeaseError(f"{device.id} is taken by {describe_holder(existing)}")
                     self.store.delete(device.id)
+                    replaced = existing
                 claim, already = self._new_claim(device, note), False
                 claim.t3_device_id = t3_device
                 if not self.store.create(claim):
                     raise LeaseError(f"{device.id} was just claimed by another session")
+        if replaced:
+            self._end_t3_sessions([replaced])
 
         if boot and device.state == STOPPED:
             try:
@@ -189,6 +193,7 @@ class Lease:
         candidates = [d for d in self.devices if d.online and matches(d)]
         candidates.sort(key=lambda d: (d.kind != EMULATOR, d.id))
         online = self.online_ids()
+        replaced, claim = [], None
         with self.store.lock():
             for device in candidates:
                 existing = self.store.read(device.id)
@@ -196,9 +201,14 @@ class Lease:
                     if self.is_mine(existing) or not stale_reason(existing, self.expiry, online):
                         continue
                     self.store.delete(device.id)
-                claim = self._new_claim(device, note)
-                if self.store.create(claim):
-                    return claim
+                    replaced.append(existing)
+                new = self._new_claim(device, note)
+                if self.store.create(new):
+                    claim = new
+                    break
+        self._end_t3_sessions(replaced)
+        if claim:
+            return claim
 
         bootable = [
             d.id for d in self.devices

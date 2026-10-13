@@ -8,7 +8,9 @@ from pathlib import Path
 from unittest import mock
 
 from devicelease import t3
-from fake_t3 import add_thread, create_db, install_agent_device, set_thread
+from fake_t3 import (
+    add_agent_device_session, add_thread, create_db, install_agent_device, set_thread,
+)
 
 
 class T3Test(unittest.TestCase):
@@ -55,6 +57,8 @@ class T3Test(unittest.TestCase):
 
     def test_close_agent_device_calls_the_launcher(self):
         calls = install_agent_device(self.db)
+        for device in ("uitest_api37", "emulator-5554"):
+            add_agent_device_session(self.db, t3.agent_device_session("thread-1", device))
         t3.close_agent_device("thread-1", ["uitest_api37", "emulator-5554", "uitest_api37"],
                               Path(self.tmp.name) / "log.txt")
         config = self.db.parent / "device" / "hosts" / "25bf8e1a2393f1108d37029b.json"
@@ -62,6 +66,18 @@ class T3Test(unittest.TestCase):
             f"close --config {config} --session {t3.agent_device_session('thread-1', d)}"
             for d in ("uitest_api37", "emulator-5554")
         ])
+
+    def test_close_agent_device_skips_sessions_that_never_started(self):
+        calls = install_agent_device(self.db)
+        add_agent_device_session(self.db, t3.agent_device_session("thread-1", "emulator-5554"))
+        t3.close_agent_device("thread-1", ["uitest_api37", "emulator-5554"],
+                              Path(self.tmp.name) / "log.txt")
+        self.assertEqual(len(calls.read_text().splitlines()), 1)
+        self.assertIn(t3.agent_device_session("thread-1", "emulator-5554"), calls.read_text())
+
+        calls.unlink()
+        t3.close_agent_device("thread-2", ["uitest_api37"], Path(self.tmp.name) / "log.txt")
+        self.assertFalse(calls.exists())
 
     def test_close_agent_device_without_t3_code_does_nothing(self):
         t3.close_agent_device("thread-1", ["uitest_api37"], Path(self.tmp.name) / "log.txt")

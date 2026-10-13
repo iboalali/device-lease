@@ -6,7 +6,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from fake_t3 import add_thread, create_db, install_agent_device, set_thread
+from devicelease.t3 import agent_device_session
+from fake_t3 import (
+    add_agent_device_session, add_thread, create_db, install_agent_device, set_thread,
+)
 
 SRC = str(Path(__file__).resolve().parents[1] / "src")
 
@@ -168,6 +171,7 @@ class HookTest(unittest.TestCase):
         create_db(self.t3_db)
         add_thread(self.t3_db, "thread-1", "session-a")
         calls = install_agent_device(self.t3_db)
+        add_agent_device_session(self.t3_db, agent_device_session("thread-1", "emulator-5554"))
         self.hook("pre-device-open", tool_name="mcp__t3-code__device_open",
                   tool_input={"deviceId": "emulator-5554"})
         self.assertEqual(self.holders(), {"uitest_api37": "t3:thread-1"})
@@ -175,19 +179,32 @@ class HookTest(unittest.TestCase):
                   tool_input={"deviceId": "emulator-5554"})
         self.assertEqual(self.holders(), {})
         sessions = [line.split("--session ")[1] for line in calls.read_text().splitlines()]
-        from devicelease.t3 import agent_device_session
         self.assertIn(agent_device_session("thread-1", "emulator-5554"), sessions)
 
     def test_settled_thread_ends_the_agent_device_session(self):
         create_db(self.t3_db)
         add_thread(self.t3_db, "thread-1", "session-a")
         calls = install_agent_device(self.t3_db)
+        add_agent_device_session(self.t3_db, agent_device_session("thread-1", "uitest_api37"))
         self.hook("pre-device-open", tool_name="mcp__t3-code__device_open",
                   tool_input={"deviceId": "uitest_api37"})
         set_thread(self.t3_db, "thread-1", "settled_override", "settled")
         self.cli("gc", session="session-b")
         self.assertEqual(self.holders(), {})
         self.assertIn("close --config", calls.read_text())
+
+    def test_taking_over_a_settled_thread_ends_its_agent_device_session(self):
+        create_db(self.t3_db)
+        add_thread(self.t3_db, "thread-1", "session-a")
+        add_thread(self.t3_db, "thread-2", "session-b")
+        calls = install_agent_device(self.t3_db)
+        add_agent_device_session(self.t3_db, agent_device_session("thread-1", "emulator-5554"))
+        self.hook("pre-device-open", tool_name="mcp__t3-code__device_open",
+                  tool_input={"deviceId": "emulator-5554"})
+        set_thread(self.t3_db, "thread-1", "settled_override", "settled")
+        self.assertEqual(self.cli("claim", "uitest_api37", session="session-b").returncode, 0)
+        self.assertEqual(self.holders(), {"uitest_api37": "t3:thread-2"})
+        self.assertIn(agent_device_session("thread-1", "emulator-5554"), calls.read_text())
 
     def test_t3_project_policy(self):
         create_db(self.t3_db)
