@@ -168,8 +168,11 @@ def find(devices: list[Device], target: str) -> Device | None:
     return None
 
 
-def boot_emulator(avd: str, log_path: Path, timeout: float = 240) -> str:
-    """Starts an emulator, waits until Android finished booting and returns its serial."""
+def boot_emulator(avd: str, log_path: Path, timeout: float = 240, snapshot: bool = True) -> str:
+    """Starts an emulator, waits until Android finished booting and returns its serial.
+
+    Without `snapshot` it cold boots and neither loads nor saves the Quick Boot snapshot.
+    """
     emulator = paths.emulator_path()
     if emulator is None:
         raise DiscoveryError("emulator not found; set ANDROID_HOME or DEVICELEASE_EMULATOR")
@@ -178,7 +181,7 @@ def boot_emulator(avd: str, log_path: Path, timeout: float = 240) -> str:
     # Append mode, so the cleanup can empty the log while the emulator still writes to it.
     with open(log_path, "a") as log:
         process = subprocess.Popen(
-            [emulator, "-avd", avd], stdin=subprocess.DEVNULL, stdout=log,
+            [emulator, "-avd", avd, *([] if snapshot else ["-no-snapshot"])], stdin=subprocess.DEVNULL, stdout=log,
             stderr=subprocess.STDOUT, start_new_session=True,
         )
     deadline = time.monotonic() + timeout

@@ -132,14 +132,15 @@ def cmd_claim(lease: Lease, args) -> int:
     if args.any == bool(args.device):
         raise LeaseError("name a device or pass --any")
     if args.any:
-        if args.boot:
-            raise LeaseError("--boot needs a device name")
+        if args.boot or args.no_snapshot:
+            raise LeaseError("--boot and --no-snapshot need a device name")
         kind = PHYSICAL if args.physical else EMULATOR if args.emulator else None
         claim, already = lease.claim_any(kind, args.min_api, args.note), False
     else:
         if args.physical or args.emulator or args.min_api is not None:
             raise LeaseError("--physical, --emulator and --min-api only apply with --any")
-        claim, already = lease.claim(args.device, args.note, args.boot)
+        claim, already = lease.claim(args.device, args.note, args.boot or args.no_snapshot,
+                                     snapshot=not args.no_snapshot)
     if args.json:
         _print_json({**claim.to_dict(), "alreadyHeld": already})
     else:
@@ -441,6 +442,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--emulator", action="store_true", help="with --any: emulators only")
     p.add_argument("--min-api", type=int, metavar="N", help="with --any: API level N or higher")
     p.add_argument("--boot", action="store_true", help="start the emulator after claiming it")
+    p.add_argument("--no-snapshot", action="store_true",
+                   help="like --boot, but cold boot without loading or saving a snapshot")
     p.add_argument("--note", help="free text stored with the claim")
 
     p = add("release", cmd_release, "release this session's claims")

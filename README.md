@@ -26,6 +26,7 @@ devicelease list                        # every device, its state and who holds 
 devicelease claim --any                 # first free running device, emulators before phones
 devicelease claim 0A1B2C3D4E           # a specific device, by serial or AVD name
 devicelease claim Pixel_6a --boot       # claim a stopped emulator and start it
+devicelease claim Pixel_6a --no-snapshot  # same, but cold boot without the Quick Boot snapshot
 devicelease serial                      # the adb serial of the device you hold
 adb -s "$(devicelease serial)" shell    # use it
 devicelease exec -- ./gradlew connectedAndroidTest
@@ -39,7 +40,7 @@ devicelease help                        # the full guide
 | Command | What it does |
 |---|---|
 | `list [--json]` | Every device adb and the AVD folder know about: kind, API level, state (`online`, `stopped`, `offline`) and lease (`free`, `yours`, `taken by ...`, `not allowed here`). `--watch` redraws it every 2 seconds (`--interval` changes that) until Ctrl-C, for a terminal pane. |
-| `claim <id>` | Claims one device. A physical device is named by its serial, an emulator by its AVD name or current serial. Fails with the holder's name if the device is taken. `--boot` starts a stopped emulator and waits until Android has booted. `--note` stores free text with the claim. |
+| `claim <id>` | Claims one device. A physical device is named by its serial, an emulator by its AVD name or current serial. Fails with the holder's name if the device is taken. `--boot` starts a stopped emulator and waits until Android has booted. `--no-snapshot` does the same as a cold boot: the emulator neither loads nor saves its Quick Boot snapshot. `--note` stores free text with the claim. |
 | `claim --any` | Claims the first free, allowed, running device, emulators before phones. `--emulator`, `--physical` and `--min-api N` narrow the choice. If nothing is free, it says how to get a device and lists the emulators you may boot. |
 | `queue <id>` | Waits for a taken device. If it is free, claims it right away. When the device frees up, it is claimed for the first waiter in line, and the waiter is told. `--any` with `--emulator`, `--physical` and `--min-api N` waits for the first matching device. See "Wait for a taken device". |
 | `unqueue [<id>]` | Leaves the queue. `--any` leaves the queue for any device, `--all` leaves every queue. |

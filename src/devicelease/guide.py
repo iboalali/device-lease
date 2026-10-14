@@ -12,7 +12,8 @@ USE A DEVICE
   2. devicelease claim <id>
        Claims one device, by AVD name or adb serial. `devicelease claim --any` takes
        the first free one, emulators before phones. `devicelease claim <avd> --boot`
-       claims a stopped emulator and starts it.
+       claims a stopped emulator and starts it. `--no-snapshot` instead of `--boot`
+       cold boots it, without loading or saving the Quick Boot snapshot.
        Run the claim as its own command. Hooks check a whole command before any part
        of it runs, so `devicelease claim X && adb -s X ...` is still blocked.
   3. Name the device in every command:
@@ -60,8 +61,10 @@ COMMANDS
       Every device adb and the AVD folder know about: kind, API level, state and lease
       (free, yours, taken by ..., not allowed here), and how many sessions wait for it.
       --watch redraws it every 2 seconds until Ctrl-C, for a terminal pane.
-  claim <id> [--boot] [--note TEXT]
+  claim <id> [--boot|--no-snapshot] [--note TEXT]
       Claims one device. Fails with the holder's name if the device is taken.
+      --boot starts a stopped emulator. --no-snapshot cold boots it instead, without
+      loading or saving the Quick Boot snapshot.
   claim --any [--emulator|--physical] [--min-api N] [--note TEXT]
       Claims the first free, allowed, running device that matches.
   queue <id> | --any [--emulator|--physical] [--min-api N]  [--wait [--timeout MIN]]

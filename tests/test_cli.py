@@ -150,6 +150,11 @@ class CliTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("--boot", result.stderr)
 
+    def test_no_snapshot_needs_a_device_name(self):
+        result = self.run_cli("claim", "--any", "--no-snapshot")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("need a device name", result.stderr)
+
     def test_expired_claim_is_taken_over(self):
         self.run_cli("claim", "uitest_api37", check=True)
         claim_file = Path(self.env["DEVICELEASE_STATE_DIR"]) / "claims" / "uitest_api37.json"

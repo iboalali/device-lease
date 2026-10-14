@@ -237,7 +237,7 @@ class Lease:
         claim.pid_start = self.owner.pid_start
 
     def claim(self, target: str, note: str | None = None, boot: bool = False,
-              t3_device: str | None = None) -> tuple[Claim, bool]:
+              t3_device: str | None = None, snapshot: bool = True) -> tuple[Claim, bool]:
         """Claims a device. Returns the claim and whether this owner already held it."""
         device = find(self.devices, target)
         if device is None:
@@ -273,7 +273,8 @@ class Lease:
 
         if boot and device.state == STOPPED:
             try:
-                serial = boot_emulator(device.id, paths.state_dir() / "logs" / f"{device.id}.log")
+                serial = boot_emulator(device.id, paths.state_dir() / "logs" / f"{device.id}.log",
+                                       snapshot=snapshot)
             except DiscoveryError:
                 if not already:
                     self._release([claim])
