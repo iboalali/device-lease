@@ -13,8 +13,8 @@ Every agent session on this machine (Claude Code in T3 Code or in a terminal, Co
 | State location | `~/.local/state/devicelease/claims/` | One shared folder for all agents and tools. |
 | Policy location | `~/.config/devicelease/policy.json`, plus optional `.devicelease.json` per repo | User file is the source of truth; a repo file can only narrow it. |
 | Claim expiry | 30 minutes without a heartbeat | Frees devices from crashed or killed sessions. |
-| No claim yet | Block and tell the agent to claim | Explicit claims are easier to reason about than silent auto-claims. Revisit after a week of use. |
-| Platforms | Android only (physical devices and emulators) | iOS is not available on this Linux machine. The data model keeps a `platform` field so iOS can be added later. |
+| No claim yet | Block and tell the agent to claim | Explicit claims are easier to reason about than silent auto-claims. |
+| Platforms | Android only (physical devices and emulators) | iOS is not available on this Linux machine. |
 
 ## Concepts
 
@@ -128,11 +128,10 @@ Done when a session that has not claimed a device is blocked from `adb -s 0A1B2C
 - `agent-device close` on release for T3-originated claims.
 - Manual test in T3 Code: two threads, one device, second thread is denied in `device_open` and in `agent-device` commands.
 
-### Phase 5: polish (later)
+### Phase 5: polish
 
-- `devicelease status --watch` for a terminal pane.
-- Optional auto-claim on first use, if blocking turns out to be annoying.
-- iOS, if a macOS host is added.
+- `devicelease list --watch` for a terminal pane, and cleanup of the state folder. Designed in [cleanup-plan.md](cleanup-plan.md).
+- No auto-claim on first use, and no iOS.
 
 ## Limits
 

@@ -174,7 +174,9 @@ def boot_emulator(avd: str, log_path: Path, timeout: float = 240) -> str:
     if emulator is None:
         raise DiscoveryError("emulator not found; set ANDROID_HOME or DEVICELEASE_EMULATOR")
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(log_path, "w") as log:
+    log_path.unlink(missing_ok=True)
+    # Append mode, so the cleanup can empty the log while the emulator still writes to it.
+    with open(log_path, "a") as log:
         process = subprocess.Popen(
             [emulator, "-avd", avd], stdin=subprocess.DEVNULL, stdout=log,
             stderr=subprocess.STDOUT, start_new_session=True,

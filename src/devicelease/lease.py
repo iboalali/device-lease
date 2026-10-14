@@ -1,7 +1,7 @@
 import time
 from datetime import timedelta
 
-from devicelease import notify, paths, t3
+from devicelease import cleanup, notify, paths, t3
 from devicelease.claims import Claim, Store, now, stale_reason
 from devicelease.devices import (
     EMULATOR, PHYSICAL, STOPPED, Device, DiscoveryError, boot_emulator, discover, find,
@@ -150,7 +150,16 @@ class Lease:
                     self.store.write(claim)
         self._end_t3_sessions([claim for claim, _ in removed])
         self.hand_off()
+        if cleanup.due():
+            self.clean()
         return removed
+
+    def clean(self) -> list[tuple[str, str]]:
+        try:
+            running = {d.id for d in self.devices if d.online and d.kind == EMULATOR}
+        except DiscoveryError:
+            running = None
+        return cleanup.run(running)
 
     def _entry_allows(self, entry: Entry, device: Device, policies: dict) -> bool:
         """Whether the waiter's own policy allows the device, rather than the caller's."""

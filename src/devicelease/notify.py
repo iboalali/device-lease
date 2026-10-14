@@ -17,7 +17,7 @@ import sys
 import time
 from pathlib import Path
 
-from devicelease import claude_sessions, paths
+from devicelease import claude_sessions, cleanup, paths
 from devicelease.claims import Claim, format_time, now
 
 SENT = "sent"
@@ -31,6 +31,7 @@ RETRIES = 2
 def _log(line: str) -> None:
     log = paths.state_dir() / "logs" / "notify.log"
     log.parent.mkdir(parents=True, exist_ok=True)
+    cleanup.rotate(log)
     with open(log, "a") as f:
         f.write(f"{format_time(now())} {line}\n")
 
@@ -178,6 +179,7 @@ def spawn() -> None:
         return
     log = paths.state_dir() / "logs" / "watcher.log"
     log.parent.mkdir(parents=True, exist_ok=True)
+    cleanup.rotate(log)
     src = str(Path(__file__).resolve().parents[1])
     env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CODE_SESSION_ID"}
     env["PYTHONPATH"] = os.pathsep.join(filter(None, [src, env.get("PYTHONPATH")]))

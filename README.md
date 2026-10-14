@@ -38,7 +38,7 @@ devicelease help                        # the full guide
 
 | Command | What it does |
 |---|---|
-| `list [--json]` | Every device adb and the AVD folder know about: kind, API level, state (`online`, `stopped`, `offline`) and lease (`free`, `yours`, `taken by ...`, `not allowed here`). |
+| `list [--json]` | Every device adb and the AVD folder know about: kind, API level, state (`online`, `stopped`, `offline`) and lease (`free`, `yours`, `taken by ...`, `not allowed here`). `--watch` redraws it every 2 seconds (`--interval` changes that) until Ctrl-C, for a terminal pane. |
 | `claim <id>` | Claims one device. A physical device is named by its serial, an emulator by its AVD name or current serial. Fails with the holder's name if the device is taken. `--boot` starts a stopped emulator and waits until Android has booted. `--note` stores free text with the claim. |
 | `claim --any` | Claims the first free, allowed, running device, emulators before phones. `--emulator`, `--physical` and `--min-api N` narrow the choice. If nothing is free, it says how to get a device and lists the emulators you may boot. |
 | `queue <id>` | Waits for a taken device. If it is free, claims it right away. When the device frees up, it is claimed for the first waiter in line, and the waiter is told. `--any` with `--emulator`, `--physical` and `--min-api N` waits for the first matching device. See "Wait for a taken device". |
@@ -50,7 +50,7 @@ devicelease help                        # the full guide
 | `check <id or serial>` | Exits 0 if you hold the device, 1 otherwise. For scripts. |
 | `exec [<id>] -- <command>` | Runs a command with `ANDROID_SERIAL` set to your device. Gradle device tasks use every connected device without it. |
 | `heartbeat` | Refreshes your claims. The Claude Code hooks call it for you. |
-| `gc` | Removes stale claims. Every command does this anyway before it acts. |
+| `gc` | Removes stale claims and cleans the state folder (see Files). Every command removes stale claims anyway before it acts. |
 | `watch` | Hands devices to queued Claude Code sessions and messages them. `queue` starts it in the background. |
 | `help [<command>]` | The full guide, or the options of one command. |
 
@@ -171,6 +171,12 @@ devicelease release --all
 | `~/.local/state/devicelease/claims/` | One JSON file per claimed device (`DEVICELEASE_STATE_DIR` moves it). |
 | `~/.local/state/devicelease/queue/` | One JSON file per queue entry. |
 | `~/.local/state/devicelease/logs/` | Emulator boot logs, `agent-device close` calls, queue messages (`notify.log`) and the watcher's output. |
+
+The folder cleans itself. `gc` does it, and so does any sweep, at most once an hour:
+
+- `notify.log`, `watcher.log` and `agent-device.log` are rotated to `<name>.1` once they pass 5 MiB.
+- A running emulator's boot log is emptied once it passes 50 MiB. The boot log of an emulator not used for 7 days is deleted.
+- Temp files left by a process that died mid-write, and claim or queue files that cannot be read, are deleted after an hour.
 | `~/.config/devicelease/policy.json` | The policy (`DEVICELEASE_POLICY` moves it). |
 
 ## Limits

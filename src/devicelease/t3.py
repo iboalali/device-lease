@@ -12,6 +12,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from devicelease import cleanup
+
 LOCAL_HOST = "local"
 
 _warned = False
@@ -131,6 +133,7 @@ def close_agent_device(thread_id: str, device_ids: list[str], log_path: Path) ->
     sessions = [(d, s) for d, s in sessions if (device_dir / "agent-device" / "sessions" / s).is_dir()]
     if not sessions:
         return
+    cleanup.rotate(log_path)
     with open(log_path, "a") as log:
         for device_id, session in sessions:
             log.write(f"close {session} (thread {thread_id}, device {device_id})\n")

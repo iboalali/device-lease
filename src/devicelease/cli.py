@@ -1,8 +1,11 @@
 import argparse
+import io
 import json
 import os
 import signal
 import sys
+import time
+from contextlib import redirect_stdout
 from datetime import timedelta
 
 from devicelease import notify, paths
@@ -35,6 +38,29 @@ def _owner_label(lease: Lease, owner: str) -> str:
 
 
 def cmd_list(lease: Lease, args) -> int:
+    if not args.watch:
+        return _list(lease, args)
+    if args.json:
+        raise LeaseError("--watch takes no --json")
+    clear = "\033[H\033[2J" if sys.stdout.isatty() else ""
+    try:
+        while True:
+            frame = io.StringIO()
+            with redirect_stdout(frame):
+                try:
+                    _list(lease, args)
+                except (DiscoveryError, PolicyError) as e:
+                    print(f"devicelease: {e}")
+            sys.stdout.write(f"{clear}devicelease list at {time.strftime('%H:%M:%S')}, "
+                             f"every {args.interval:g}s (Ctrl-C stops)\n\n{frame.getvalue()}")
+            sys.stdout.flush()
+            time.sleep(args.interval)
+            lease._devices = None
+    except KeyboardInterrupt:
+        return 0
+
+
+def _list(lease: Lease, args) -> int:
     lease.sweep()
     claims = {c.device: c for c in lease.store.all()}
     entries = lease.queue.all()
@@ -356,13 +382,19 @@ def cmd_watch(lease: Lease, args) -> int:
 
 def cmd_gc(lease: Lease, args) -> int:
     removed = lease.sweep()
+    files = lease.clean()
     if args.json:
-        _print_json([{**c.to_dict(), "reason": reason} for c, reason in removed])
-    elif removed:
-        for claim, reason in removed:
-            print(f"Removed {claim.device} from {short_owner(claim.owner)}: {reason}")
-    else:
-        print("No stale claims.")
+        _print_json({
+            "claims": [{**c.to_dict(), "reason": reason} for c, reason in removed],
+            "files": [{"path": path, "action": action} for path, action in files],
+        })
+        return 0
+    for claim, reason in removed:
+        print(f"Removed {claim.device} from {short_owner(claim.owner)}: {reason}")
+    for path, action in files:
+        print(f"{paths.display_path(path)}: {action}")
+    if not removed and not files:
+        print("No stale claims, nothing to clean.")
     return 0
 
 
@@ -383,7 +415,10 @@ def build_parser() -> argparse.ArgumentParser:
         p.set_defaults(handler=handler)
         return p
 
-    add("list", cmd_list, "list every known device and who holds it")
+    p = add("list", cmd_list, "list every known device and who holds it")
+    p.add_argument("--watch", action="store_true", help="redraw the list until Ctrl-C")
+    p.add_argument("--interval", type=float, default=2, metavar="SECONDS",
+                   help="with --watch: seconds between redraws (default 2)")
 
     p = add("claim", cmd_claim, "claim a device for this session")
     p.add_argument("device", nargs="?", help="device ID (AVD name or adb serial)")
@@ -430,7 +465,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = add("exec", cmd_exec, "run a command with ANDROID_SERIAL set to the claimed device")
     p.add_argument("device", nargs="?")
 
-    add("gc", cmd_gc, "remove stale claims")
+    add("gc", cmd_gc, "remove stale claims and clean the state folder")
 
     p = add("watch", cmd_watch, "hand devices to queued Claude Code sessions and message them; "
                                  "`queue` starts it")

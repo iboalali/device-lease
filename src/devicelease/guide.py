@@ -56,9 +56,10 @@ WHEN THE DEVICE IS TAKEN
 
 COMMANDS
 
-  list [--json]
+  list [--json] [--watch [--interval SECONDS]]
       Every device adb and the AVD folder know about: kind, API level, state and lease
       (free, yours, taken by ..., not allowed here), and how many sessions wait for it.
+      --watch redraws it every 2 seconds until Ctrl-C, for a terminal pane.
   claim <id> [--boot] [--note TEXT]
       Claims one device. Fails with the holder's name if the device is taken.
   claim --any [--emulator|--physical] [--min-api N] [--note TEXT]
@@ -86,7 +87,10 @@ COMMANDS
   heartbeat
       Refreshes your claims. The Claude Code hooks call it for you.
   gc
-      Removes stale claims. Every command does this before it acts.
+      Removes stale claims, and cleans the state folder: rotates logs over 5 MiB,
+      empties a running emulator's log over 50 MiB, deletes boot logs of emulators
+      unused for 7 days and broken or leftover files older than an hour. Sweeps do
+      the cleaning too, at most once an hour.
   watch [--once]
       Hands devices to queued Claude Code sessions and messages them. `queue` starts
       it in the background; you never need to run it.

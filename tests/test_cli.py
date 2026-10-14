@@ -164,7 +164,7 @@ class CliTest(unittest.TestCase):
         self.run_cli("gc", check=True)
         self.assertEqual([c["device"] for c in self.run_json("status")["claims"]], ["0A1B2C3D4E"])
         self.set_devices(DEVICES[1:])
-        removed = self.run_json("gc")
+        removed = self.run_json("gc")["claims"]
         self.assertEqual([(c["device"], c["reason"]) for c in removed],
                          [("0A1B2C3D4E", "device disconnected")])
 
@@ -180,7 +180,7 @@ class CliTest(unittest.TestCase):
         self.assertIn("t3:11111111 (you)", self.run_cli("status", session="session-1").stdout)
 
         set_thread(db, "11111111-2222-3333-4444-555555555555", "settled_override", "settled")
-        removed = self.run_json("gc")
+        removed = self.run_json("gc")["claims"]
         self.assertEqual([(c["device"], c["reason"]) for c in removed],
                          [("uitest_api37", "thread settled")])
 
