@@ -126,6 +126,8 @@ class QueueTest(QueueBase):
         self.assertEqual(result["status"], "yours")
         self.assertEqual(self.holders(), {"uitest_api37": "session-a"})
         self.assertEqual(self.status()["queue"], [])
+        again = self.cli("queue", "uitest_api37", "--wait", check=True).stdout
+        self.assertEqual(again, "You already hold uitest_api37; nothing to wait for.\n")
 
     def test_queue_without_wait_needs_a_claude_code_session(self):
         self.cli("claim", "uitest_api37", check=True)

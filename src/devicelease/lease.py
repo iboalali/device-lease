@@ -438,9 +438,11 @@ class Lease:
         return next((c for c in self.mine() if c.queue_entry == entry_id), None)
 
     def enqueue(self, target: str | None, kind: str | None = None, min_api: int | None = None,
-                wait: bool = False, note: str | None = None) -> tuple[Claim | None, Entry | None]:
+                wait: bool = False, note: str | None = None
+                ) -> tuple[Claim | None, Entry | None, bool]:
         """Claims a matching device now if one is free. Otherwise adds this owner's queue entry,
-        or refreshes it when it exists. Returns the claim, or the entry when it has to wait."""
+        or refreshes it when it exists. Returns the claim or the entry when it has to wait, and
+        whether this owner already held the claimed device."""
         if not wait and not self.messageable:
             where = "In T3 Code" if self.owner.t3_thread else "Outside a Claude Code session"
             raise LeaseError(f"{where} nothing can message you when the device is free; "
@@ -454,12 +456,13 @@ class Lease:
                 raise LeaseError(f"{device.id} is not allowed here: {reason}")
             target = device.id
             try:
-                return self.claim(target, note)[0], None
+                claim, already = self.claim(target, note)
+                return claim, None, already
             except TakenError:
                 pass
         else:
             try:
-                return self.claim_any(kind, min_api, note), None
+                return self.claim_any(kind, min_api, note), None, False
             except LeaseError:
                 pass
 
@@ -486,10 +489,10 @@ class Lease:
         self.hand_off()
         claim = self._queued_claim(entry.id)
         if claim:
-            return claim, None
+            return claim, None, False
         if mode == MESSAGE:
             notify.spawn()
-        return None, entry
+        return None, entry, False
 
     def position(self, entry: Entry) -> int:
         """The entry's place in line, 1 for the next to get a device it waits for."""

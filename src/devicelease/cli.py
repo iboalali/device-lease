@@ -284,11 +284,13 @@ def cmd_queue(lease: Lease, args) -> int:
     if args.timeout is not None and not args.wait:
         raise LeaseError("--timeout only applies with --wait")
     kind = PHYSICAL if args.physical else EMULATOR if args.emulator else None
-    claim, entry = lease.enqueue(args.device, kind, args.min_api, args.wait, args.note)
+    claim, entry, already = lease.enqueue(args.device, kind, args.min_api, args.wait, args.note)
     if claim:
         lease.take_handoff_notices()
         if args.json:
-            _print_json({"status": "yours", "claim": claim.to_dict()})
+            _print_json({"status": "yours", "claim": claim.to_dict(), "alreadyHeld": already})
+        elif already:
+            print(f"You already hold {claim.device}; nothing to wait for.")
         else:
             print(_yours_line(lease, claim))
         return 0
