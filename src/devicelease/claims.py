@@ -44,6 +44,10 @@ class Claim:
     t3_device_id: str | None = None
     """The deviceId T3 Code's device_open used, for claims made by opening the Device panel."""
     note: str | None = None
+    queue_entry: str | None = None
+    """The queue entry this claim was handed to, for claims made by the queue."""
+    handoff_pending: bool = False
+    """True until the owner has been told the queue handed it this device."""
 
     @property
     def human(self) -> bool:
@@ -65,6 +69,8 @@ class Claim:
             "t3Thread": self.t3_thread,
             "t3DeviceId": self.t3_device_id,
             "note": self.note,
+            "queueEntry": self.queue_entry,
+            "handoffPending": self.handoff_pending,
         }
 
     @classmethod
@@ -84,6 +90,8 @@ class Claim:
             t3_thread=data.get("t3Thread"),
             t3_device_id=data.get("t3DeviceId"),
             note=data.get("note"),
+            queue_entry=data.get("queueEntry"),
+            handoff_pending=data.get("handoffPending", False),
         )
 
 
@@ -114,6 +122,17 @@ def stale_reason(claim: Claim, expiry: timedelta, online: set[str] | None,
     if claim.pid is not None and not process_alive(claim.pid, claim.pid_start):
         return "owner process exited"
     return None
+
+
+def write_temp(folder: Path, data: dict) -> Path:
+    """Writes JSON to a new temporary file in the folder, for a rename or link into place."""
+    temp = folder / f".tmp-{os.getpid()}-{uuid.uuid4().hex}"
+    with open(temp, "w") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+        f.flush()
+        os.fsync(f.fileno())
+    return temp
 
 
 class Store:
@@ -152,18 +171,9 @@ class Store:
         claims = (self._load(p) for p in sorted(self.root.glob("*.json")))
         return [c for c in claims if c is not None]
 
-    def _write_temp(self, claim: Claim) -> Path:
-        temp = self.root / f".tmp-{os.getpid()}-{uuid.uuid4().hex}"
-        with open(temp, "w") as f:
-            json.dump(claim.to_dict(), f, indent=2)
-            f.write("\n")
-            f.flush()
-            os.fsync(f.fileno())
-        return temp
-
     def create(self, claim: Claim) -> bool:
         """Adds a claim unless the device already has one. Atomic even without the lock."""
-        temp = self._write_temp(claim)
+        temp = write_temp(self.root, claim.to_dict())
         try:
             os.link(temp, self.path(claim.device))
             return True
@@ -173,7 +183,7 @@ class Store:
             temp.unlink()
 
     def write(self, claim: Claim) -> None:
-        os.replace(self._write_temp(claim), self.path(claim.device))
+        os.replace(write_temp(self.root, claim.to_dict()), self.path(claim.device))
 
     def delete(self, device: str) -> None:
         try:

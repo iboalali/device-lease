@@ -19,6 +19,10 @@ def claims_dir() -> Path:
     return state_dir() / "claims"
 
 
+def queue_dir() -> Path:
+    return state_dir() / "queue"
+
+
 def policy_path() -> Path:
     override = os.environ.get("DEVICELEASE_POLICY")
     if override:

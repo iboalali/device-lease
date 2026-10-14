@@ -31,6 +31,12 @@ def _deny(reason: str) -> None:
     }}, sys.stdout)
 
 
+def handoff_notice(claim: Claim) -> str:
+    serial = f" (serial {claim.serial})" if claim.serial and claim.serial != claim.device else ""
+    return (f"{claim.device}{serial} was handed to you from the queue. "
+            f"Release it with `devicelease release` when done.")
+
+
 def _valid_claims(lease: Lease) -> list[Claim]:
     return [c for c in lease.mine() if not lease.stale(c)]
 
@@ -118,7 +124,10 @@ def pre_device_open(data: dict) -> None:
     try:
         lease.claim(device_id, t3_device=device_id)
     except LeaseError as e:
-        _deny(f"devicelease: {e}. Run `devicelease list` to see free devices.")
+        message = str(e).rstrip(".") + "."
+        if "devicelease list" not in message:
+            message += " Run `devicelease list` to see free devices."
+        _deny(f"devicelease: {message}")
 
 
 def post_device_close(data: dict) -> None:
@@ -137,6 +146,12 @@ def heartbeat(data: dict) -> None:
     lease = _lease(data)
     if lease.mine():
         lease.heartbeat()
+    notices = [handoff_notice(c) for c in lease.take_handoff_notices()]
+    if notices:
+        json.dump({"hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "additionalContext": "devicelease: " + " ".join(notices),
+        }}, sys.stdout)
 
 
 def session_end(data: dict) -> None:
@@ -145,6 +160,7 @@ def session_end(data: dict) -> None:
     # not mean the thread is done. Its claims end when the thread is settled instead.
     if lease.owner.t3_thread:
         return
+    lease.unqueue(everything=True)
     lease.release(everything=True)
 
 

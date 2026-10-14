@@ -43,6 +43,7 @@ class CliTest(unittest.TestCase):
             DEVICELEASE_STATE_DIR=str(root / "state"),
             DEVICELEASE_POLICY=str(self.policy_file),
             DEVICELEASE_T3_DB=str(root / "t3.sqlite"),
+            DEVICELEASE_CLAUDE_SESSIONS=str(root / "sessions"),
         )
 
     def set_devices(self, devices):
@@ -156,7 +157,7 @@ class CliTest(unittest.TestCase):
     def test_human_claim_ends_when_device_disconnects(self):
         self.run_cli("claim", "0A1B2C3D4E", "--owner", "me", check=True)
         self.run_cli("gc", check=True)
-        self.assertEqual([c["device"] for c in self.run_json("status")], ["0A1B2C3D4E"])
+        self.assertEqual([c["device"] for c in self.run_json("status")["claims"]], ["0A1B2C3D4E"])
         self.set_devices(DEVICES[1:])
         removed = self.run_json("gc")
         self.assertEqual([(c["device"], c["reason"]) for c in removed],
@@ -184,7 +185,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("--yes", result.stderr)
         self.run_cli("release", "--force", "uitest_api37", "--yes", owner="session-b", check=True)
-        self.assertEqual(self.run_json("status"), [])
+        self.assertEqual(self.run_json("status")["claims"], [])
 
     def test_concurrent_claim_any_never_double_assigns(self):
         devices = [
@@ -203,7 +204,7 @@ class CliTest(unittest.TestCase):
         won = [json.loads(r.stdout)["device"] for r in results if r.returncode == 0]
         self.assertEqual(sorted(won), sorted(d["id"] for d in devices))
         self.assertEqual(sum(r.returncode == 1 for r in results), 15)
-        owners = {c["device"]: c["owner"] for c in self.run_json("status")}
+        owners = {c["device"]: c["owner"] for c in self.run_json("status")["claims"]}
         self.assertEqual(len(owners), 5)
         self.assertEqual(len(set(owners.values())), 5)
 

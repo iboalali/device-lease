@@ -43,6 +43,7 @@ class HookTest(unittest.TestCase):
             DEVICELEASE_STATE_DIR=str(root / "state"),
             DEVICELEASE_POLICY=str(root / "policy.json"),
             DEVICELEASE_T3_DB=str(self.t3_db),
+            DEVICELEASE_CLAUDE_SESSIONS=str(root / "sessions"),
         )
 
     def set_devices(self, devices):
@@ -73,7 +74,7 @@ class HookTest(unittest.TestCase):
 
     def holders(self):
         result = self.cli("status", "--json")
-        return {c["device"]: c["owner"] for c in json.loads(result.stdout)}
+        return {c["device"]: c["owner"] for c in json.loads(result.stdout)["claims"]}
 
     def test_unrelated_commands_pass(self):
         self.assertIsNone(self.bash("ls -la && git status"))

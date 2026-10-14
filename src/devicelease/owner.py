@@ -14,6 +14,7 @@ class Owner:
     pid_start: int | None = None
     t3_thread: str | None = None
     aliases: tuple[str, ...] = ()
+    claude_session: str | None = None
 
     @property
     def human(self) -> bool:
@@ -36,8 +37,9 @@ def resolve_owner(explicit: str | None = None, env=None) -> Owner:
     if session:
         thread = t3.thread_for_session(session)
         if thread:
-            return Owner(f"t3:{thread}", t3_thread=thread, aliases=(session,))
-        return Owner(session)
+            return Owner(f"t3:{thread}", t3_thread=thread, aliases=(session,),
+                         claude_session=session)
+        return Owner(session, claude_session=session)
     named = env.get("DEVICELEASE_OWNER")
     if named:
         return Owner(named)
