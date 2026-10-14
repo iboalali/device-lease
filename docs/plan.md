@@ -58,6 +58,10 @@ Every agent session on this machine (Claude Code in T3 Code or in a terminal, Co
 | `devicelease check <serial>` | Exit 0 if this owner holds the device, otherwise exit 1 with a message. Used by hooks and scripts. |
 | `devicelease exec [<id>] -- <cmd>` | Runs a command with `ANDROID_SERIAL` set to the claimed device. Covers Gradle `connectedAndroidTest` and `installDebug`. |
 | `devicelease gc` | Removes stale claims. |
+| `devicelease queue <id>\|--any [--wait]` | Waits for a taken device and claims it for the waiter when it frees up. Designed in [queue-plan.md](queue-plan.md). |
+| `devicelease unqueue [<id>\|--any\|--all]` | Leaves the queue. |
+| `devicelease watch` | Hands devices to queued Claude Code sessions and messages them. Started by `queue`. |
+| `devicelease help [<command>]` | The full guide for agents and people, or one command's options. |
 
 Output is plain text by default and JSON with `--json`, so agents and hooks can both use it.
 

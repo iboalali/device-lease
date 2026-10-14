@@ -30,13 +30,19 @@ devicelease serial                      # the adb serial of the device you hold
 adb -s "$(devicelease serial)" shell    # use it
 devicelease exec -- ./gradlew connectedAndroidTest
 devicelease release                     # free it again
+devicelease queue Pixel_6a --wait       # wait until a taken device is yours
+devicelease help                        # the full guide
 ```
+
+`devicelease help` prints everything an agent needs to know in one go: the workflow, how to wait for a taken device, every command, ownership and files. The denial messages point to it.
 
 | Command | What it does |
 |---|---|
 | `list [--json]` | Every device adb and the AVD folder know about: kind, API level, state (`online`, `stopped`, `offline`) and lease (`free`, `yours`, `taken by ...`, `not allowed here`). |
 | `claim <id>` | Claims one device. A physical device is named by its serial, an emulator by its AVD name or current serial. Fails with the holder's name if the device is taken. `--boot` starts a stopped emulator and waits until Android has booted. `--note` stores free text with the claim. |
 | `claim --any` | Claims the first free, allowed, running device, emulators before phones. `--emulator`, `--physical` and `--min-api N` narrow the choice. If nothing is free, it says how to get a device and lists the emulators you may boot. |
+| `queue <id>` | Waits for a taken device. If it is free, claims it right away. When the device frees up, it is claimed for the first waiter in line, and the waiter is told. `--any` with `--emulator`, `--physical` and `--min-api N` waits for the first matching device. See "Wait for a taken device". |
+| `unqueue [<id>]` | Leaves the queue. `--any` leaves the queue for any device, `--all` leaves every queue. |
 | `release [<id>]` | Frees your claim. Without an ID it frees your only claim. `--all` frees every claim you hold. `--force <id>` frees another session's claim after a confirmation (`--yes` skips it). |
 | `status [--json]` | Every claim, including stale ones, with owner, project and age. |
 | `whoami [--json]` | Who devicelease thinks you are, your project, the policy that applies and the devices you may use. |
@@ -45,8 +51,26 @@ devicelease release                     # free it again
 | `exec [<id>] -- <command>` | Runs a command with `ANDROID_SERIAL` set to your device. Gradle device tasks use every connected device without it. |
 | `heartbeat` | Refreshes your claims. The Claude Code hooks call it for you. |
 | `gc` | Removes stale claims. Every command does this anyway before it acts. |
+| `watch` | Hands devices to queued Claude Code sessions and messages them. `queue` starts it in the background. |
+| `help [<command>]` | The full guide, or the options of one command. |
 
 Every command takes `--owner <name>` and most take `--json`.
+
+### Wait for a taken device
+
+When a device is taken, the message says how to wait for it, worded for where the caller runs:
+
+| Where | How it waits | How it hears |
+|---|---|---|
+| Claude Code inside T3 Code | `devicelease queue <id> --wait`, run with Bash `run_in_background`, then the agent ends its turn | The command exits when the device is yours, which wakes the thread. A running background command keeps the thread alive past T3 Code's 30-minute idle limit. |
+| Claude Code in a terminal | `devicelease queue <id>`, then keep working | A message from a headless `claude -p --model haiku` run, sent by `devicelease watch` |
+| Codex, opencode, scripts | `devicelease queue <id> --wait` | The command returns |
+
+- `--wait` exits 0 with `<id> is free and now yours (serial ...)`, 3 with "still queued" after 115 minutes (below the 2-hour limit of a background command, run it again to keep the place), and 1 when the entry ended. Ctrl-C leaves the queue.
+- First come, first served, across named and `--any` waiters. A direct `claim` cannot jump the queue.
+- The waiter's own policy decides which devices it may get.
+- An entry ends with its owner (session exits, thread settled), with `unqueue`, or 10 minutes after the last poll of its `--wait`.
+- A session that got a device from the queue is also told on its next devicelease command or Bash call, if no message reached it.
 
 ### Who owns a claim
 
@@ -97,7 +121,8 @@ This adds five hooks to `~/.claude/settings.json`, with a backup next to it. The
 - The check runs before any part of the command, so claim a device in its own command before using it.
 - **T3 Code's `device_open`** claims the device it opens, and is blocked if another session holds it. **`device_close`** releases it.
 - **After every Bash or device tool call** the session's claims are refreshed.
-- **When a session ends** its claims are released. Inside T3 Code the thread keeps them until it is settled, because T3 Code restarts the `claude` process between turns.
+- **After every Bash or device tool call** a session that the queue handed a device is told so, once.
+- **When a session ends** its claims are released and it leaves the queue. Inside T3 Code the thread keeps them until it is settled, because T3 Code restarts the `claude` process between turns.
 
 A hook that fails lets the tool call through, so a broken devicelease never blocks your work.
 
@@ -113,19 +138,17 @@ T3 Code's database layout and session naming are not a public API. If a T3 Code 
 
 ### Agent instructions
 
-Tell agents about devicelease in their global instructions (`~/.claude/AGENTS.md` or `CLAUDE.md` for Claude Code, `~/.config/opencode/AGENTS.md` for opencode, `~/.codex/AGENTS.md` for Codex), for example:
+Tell agents about devicelease in their global instructions (`~/.claude/AGENTS.md` or `CLAUDE.md` for Claude Code, `~/.config/opencode/AGENTS.md` for opencode, `~/.codex/AGENTS.md` for Codex), and let `devicelease help` carry the details, for example:
 
 ```markdown
 ## Claim an Android device before using it
 
-Devices and emulators on this machine are shared between agent sessions.
+Devices and emulators on this machine are shared between agent sessions. `devicelease` records which session holds which device, and hooks block device commands on a device this session has not claimed. Run `devicelease help` before your first device command in a session: it explains how to claim a device, name it in commands, run Gradle device tasks, wait for a taken device, and release it.
 
-1. `devicelease list` shows every device, its state and who holds it.
-2. Claim one in its own command: `devicelease claim <id>` or `devicelease claim --any`. `devicelease claim <avd> --boot` claims a stopped emulator and starts it.
-3. Name the device in every command: `adb -s <serial>`, `android ... --device=<serial>`. `devicelease serial` prints it.
-4. Run Gradle device tasks through `devicelease exec -- ./gradlew connectedAndroidTest`.
-5. `devicelease release` when done.
-6. If no device is free, don't use one another session holds.
+- Claim a device in its own command, never chained with its first use.
+- Name the device in every command (`adb -s <serial>`, `--device=<serial>`).
+- Never use a device another session holds. Pick a free one or queue for it, as `devicelease help` describes.
+- Release the device when done.
 ```
 
 Codex and opencode only get these instructions. Nothing blocks them, because the hooks exist in Claude Code only.
@@ -146,7 +169,8 @@ devicelease release --all
 | Path | Contents |
 |---|---|
 | `~/.local/state/devicelease/claims/` | One JSON file per claimed device (`DEVICELEASE_STATE_DIR` moves it). |
-| `~/.local/state/devicelease/logs/` | Emulator boot logs and `agent-device close` calls. |
+| `~/.local/state/devicelease/queue/` | One JSON file per queue entry. |
+| `~/.local/state/devicelease/logs/` | Emulator boot logs, `agent-device close` calls, queue messages (`notify.log`) and the watcher's output. |
 | `~/.config/devicelease/policy.json` | The policy (`DEVICELEASE_POLICY` moves it). |
 
 ## Limits
@@ -160,4 +184,4 @@ devicelease release --all
 PYTHONPATH=src:tests python3 -m unittest discover -s tests
 ```
 
-[docs/plan.md](docs/plan.md) holds the design and the phases.
+[docs/plan.md](docs/plan.md) holds the design and the phases, and [docs/queue-plan.md](docs/queue-plan.md) the queue's.

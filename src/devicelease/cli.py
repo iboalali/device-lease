@@ -8,6 +8,7 @@ from datetime import timedelta
 from devicelease import notify, paths
 from devicelease.claims import Claim
 from devicelease.devices import EMULATOR, MISSING, PHYSICAL, Device, DiscoveryError
+from devicelease.guide import GUIDE
 from devicelease.hook import HANDLERS, handoff_notice, run as run_hook
 from devicelease.lease import Lease, LeaseError, age, describe_holder, ordinal, short_owner
 from devicelease.policy import PolicyError
@@ -371,7 +372,8 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--json", action="store_true", help="print JSON")
 
     parser = argparse.ArgumentParser(
-        prog="devicelease", description="Shared Android device claims for agent sessions.")
+        prog="devicelease", description="Shared Android device claims for agent sessions.",
+        epilog="Run `devicelease help` for how to use it.")
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
 
     def add(name, handler, help_text):
@@ -434,7 +436,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("hook", help="Claude Code hook handler; reads the hook JSON from stdin")
     p.add_argument("name", choices=sorted(HANDLERS))
+
+    p = sub.add_parser("help", help="how to use devicelease, or the options of one command")
+    p.add_argument("topic", nargs="?", metavar="COMMAND")
     return parser
+
+
+def _help(parser: argparse.ArgumentParser, topic: str | None) -> int:
+    if topic is None:
+        print(GUIDE, end="")
+        return 0
+    commands = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+    if topic not in commands.choices:
+        print(f"devicelease: no command {topic}; run `devicelease help`", file=sys.stderr)
+        return 1
+    commands.choices[topic].print_help()
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -453,6 +470,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("unexpected arguments after --")
     if args.command == "hook":
         return run_hook(args.name)
+    if args.command == "help":
+        return _help(parser, args.topic)
 
     lease = None
     try:

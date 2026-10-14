@@ -15,7 +15,8 @@ from devicelease.lease import Lease, LeaseError
 
 GUIDE = ("Run `devicelease list`, claim a device with `devicelease claim <id>` "
          "(or `devicelease claim --any`), then target it: `adb -s <serial>`, "
-         "`android ... --device=<serial>`, or `devicelease exec -- ./gradlew ...`.")
+         "`android ... --device=<serial>`, or `devicelease exec -- ./gradlew ...`. "
+         "`devicelease help` explains it all.")
 
 
 def _lease(data: dict) -> Lease:

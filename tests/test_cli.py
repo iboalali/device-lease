@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 import subprocess
@@ -7,6 +8,8 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from devicelease.cli import build_parser
+from devicelease.guide import GUIDE
 from fake_t3 import add_thread, create_db, set_thread
 
 SRC = str(Path(__file__).resolve().parents[1] / "src")
@@ -209,6 +212,20 @@ class CliTest(unittest.TestCase):
         owners = {c["device"]: c["owner"] for c in self.run_json("status")["claims"]}
         self.assertEqual(len(owners), 5)
         self.assertEqual(len(set(owners.values())), 5)
+
+    def test_help_covers_every_command(self):
+        commands = next(a for a in build_parser()._actions
+                        if isinstance(a, argparse._SubParsersAction)).choices
+        listed = {line.split()[0] for line in GUIDE.splitlines() if line.startswith("  ")
+                  and not line.startswith("   ") and line.split()}
+        self.assertEqual(sorted(set(commands) - listed), [])
+        self.assertEqual(self.run_cli("help", check=True).stdout, GUIDE)
+
+    def test_help_for_one_command(self):
+        self.assertIn("--wait", self.run_cli("help", "queue", check=True).stdout)
+        missing = self.run_cli("help", "nope")
+        self.assertEqual(missing.returncode, 1)
+        self.assertIn("no command nope", missing.stderr)
 
 
 if __name__ == "__main__":
