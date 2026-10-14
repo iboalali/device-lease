@@ -5,7 +5,7 @@ import signal
 import sys
 from datetime import timedelta
 
-from devicelease import paths
+from devicelease import notify, paths
 from devicelease.claims import Claim
 from devicelease.devices import EMULATOR, MISSING, PHYSICAL, Device, DiscoveryError
 from devicelease.hook import HANDLERS, handoff_notice, run as run_hook
@@ -347,6 +347,10 @@ def cmd_unqueue(lease: Lease, args) -> int:
     return 0
 
 
+def cmd_watch(lease: Lease, args) -> int:
+    return notify.watch(args.once)
+
+
 def cmd_gc(lease: Lease, args) -> int:
     removed = lease.sweep()
     if args.json:
@@ -423,6 +427,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("device", nargs="?")
 
     add("gc", cmd_gc, "remove stale claims")
+
+    p = add("watch", cmd_watch, "hand devices to queued Claude Code sessions and message them; "
+                                 "`queue` starts it")
+    p.add_argument("--once", action="store_true", help="one pass, then exit")
 
     p = sub.add_parser("hook", help="Claude Code hook handler; reads the hook JSON from stdin")
     p.add_argument("name", choices=sorted(HANDLERS))

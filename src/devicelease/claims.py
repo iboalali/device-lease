@@ -48,6 +48,8 @@ class Claim:
     """The queue entry this claim was handed to, for claims made by the queue."""
     handoff_pending: bool = False
     """True until the owner has been told the queue handed it this device."""
+    notify_session: str | None = None
+    """The Claude Code session a SendMessage about the hand-off still has to reach."""
 
     @property
     def human(self) -> bool:
@@ -71,6 +73,7 @@ class Claim:
             "note": self.note,
             "queueEntry": self.queue_entry,
             "handoffPending": self.handoff_pending,
+            "notifySession": self.notify_session,
         }
 
     @classmethod
@@ -92,6 +95,7 @@ class Claim:
             note=data.get("note"),
             queue_entry=data.get("queueEntry"),
             handoff_pending=data.get("handoffPending", False),
+            notify_session=data.get("notifySession"),
         )
 
 

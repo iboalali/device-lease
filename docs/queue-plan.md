@@ -52,7 +52,7 @@ The CLI runs when a device frees by `release` (including `release --force`), by 
 Nothing runs when a claim goes stale: a T3 thread is settled, a heartbeat times out, an owner process exits. Someone has to poll.
 
 - `wait` waiters poll themselves. Each poll sweeps stale claims and runs the hand-off.
-- `message` waiters get a watcher: `devicelease watch`, a detached background process that `queue` starts. A lock file (`queue/.watcher.lock`, held with `flock`) keeps it to one instance. It sweeps and hands off every 10 seconds, sends the messages, and exits when no `message` entry is left.
+- `message` waiters get a watcher: `devicelease watch`, a detached background process that `queue` starts, and that every hand-off to a `message` entry starts as well. A lock file (`queue/.watcher.lock`, held with `flock`) keeps it to one instance; a second one exits at once. It sweeps and hands off every 10 seconds, sends the messages, and exits when no `message` entry and no unsent message is left. After letting go of the lock it checks once more, so work that arrived while it was stopping is not left without a watcher. `devicelease watch --once` runs a single pass. `DEVICELEASE_WATCHER=off` stops `queue` and the hand-off from starting it, for tests.
 
 ## Messaging a Claude Code session
 
@@ -64,7 +64,9 @@ After a hand-off to a `message` entry:
    - `"success": true`: the message is in the session's inbox. Done. A session that holds or refuses the message reports that later, after the headless run has exited, so devicelease cannot see it. The waiter then keeps the claim, finds it on its next command, and loses it through the normal heartbeat rule if it never comes back.
    - Any other result, or the run failed (not logged in, rate limit, timeout after 60 seconds): retry twice with backoff. Then keep the claim, as above.
 
-Every send is logged to `~/.local/state/devicelease/logs/notify.log`.
+A hand-off to a `message` entry stores the session ID in the claim (`notifySession`) until the send is done. If the waiter runs a devicelease command or a Bash call first, it is told there, and no message is sent.
+
+Every send is logged to `~/.local/state/devicelease/logs/notify.log`, and the watcher's own output to `logs/watcher.log`.
 
 ## Help
 

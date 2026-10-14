@@ -44,6 +44,8 @@ class HookTest(unittest.TestCase):
             DEVICELEASE_POLICY=str(root / "policy.json"),
             DEVICELEASE_T3_DB=str(self.t3_db),
             DEVICELEASE_CLAUDE_SESSIONS=str(root / "sessions"),
+            DEVICELEASE_WATCHER="off",
+            DEVICELEASE_CLAUDE="false",
         )
 
     def set_devices(self, devices):

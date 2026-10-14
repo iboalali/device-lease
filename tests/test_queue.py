@@ -22,7 +22,7 @@ DEVICES = [
 ]
 
 
-class QueueTest(unittest.TestCase):
+class QueueBase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -45,6 +45,8 @@ class QueueTest(unittest.TestCase):
             DEVICELEASE_POLICY=str(self.root / "policy.json"),
             DEVICELEASE_T3_DB=str(self.root / "t3.sqlite"),
             DEVICELEASE_CLAUDE_SESSIONS=str(self.registry),
+            DEVICELEASE_WATCHER="off",
+            DEVICELEASE_CLAUDE="false",
             DEVICELEASE_POLL_SECONDS="0.2",
         )
 
@@ -94,6 +96,8 @@ class QueueTest(unittest.TestCase):
         path = self.state / "claims" / f"{device}.json"
         path.write_text(json.dumps({**json.loads(path.read_text()), **changes}))
 
+
+class QueueTest(QueueBase):
     def test_taken_message_offers_the_queue(self):
         self.cli("claim", "uitest_api37", check=True)
         plain = self.cli("claim", "uitest_api37", owner="session-b").stderr

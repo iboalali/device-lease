@@ -1,7 +1,7 @@
 import time
 from datetime import timedelta
 
-from devicelease import paths, t3
+from devicelease import notify, paths, t3
 from devicelease.claims import Claim, Store, now, stale_reason
 from devicelease.devices import (
     EMULATOR, PHYSICAL, STOPPED, Device, DiscoveryError, boot_emulator, discover, find,
@@ -200,12 +200,15 @@ class Lease:
                     created_at=at, heartbeat_at=at, serial=device.serial, pid=entry.pid,
                     pid_start=entry.pid_start, seen_online=True, t3_thread=entry.t3_thread,
                     note=entry.note, queue_entry=entry.id, handoff_pending=True,
+                    notify_session=entry.claude_session if entry.mode == MESSAGE else None,
                 )
                 if self.store.create(claim):
                     self.queue.delete(entry.id)
                     free.remove(device)
                     given.append(claim)
         self._end_t3_sessions(replaced)
+        if any(c.notify_session for c in given):
+            notify.spawn()
         return given
 
     def _new_claim(self, device: Device, note: str | None) -> Claim:
@@ -482,7 +485,11 @@ class Lease:
             self.queue.write(entry)
         self.hand_off()
         claim = self._queued_claim(entry.id)
-        return (claim, None) if claim else (None, entry)
+        if claim:
+            return claim, None
+        if mode == MESSAGE:
+            notify.spawn()
+        return None, entry
 
     def position(self, entry: Entry) -> int:
         """The entry's place in line, 1 for the next to get a device it waits for."""
@@ -550,7 +557,8 @@ class Lease:
         return chosen
 
     def take_handoff_notices(self) -> list[Claim]:
-        """This owner's claims the queue handed over and nobody has told it about yet."""
+        """This owner's claims the queue handed over and nobody has told it about yet. The
+        caller tells it, so the watcher no longer has to message it."""
         if not any(c.handoff_pending for c in self.mine()):
             return []
         pending = []
@@ -558,6 +566,7 @@ class Lease:
             for claim in self.mine():
                 if claim.handoff_pending:
                     claim.handoff_pending = False
+                    claim.notify_session = None
                     self.store.write(claim)
                     pending.append(claim)
         return pending

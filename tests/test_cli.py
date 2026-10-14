@@ -44,6 +44,8 @@ class CliTest(unittest.TestCase):
             DEVICELEASE_POLICY=str(self.policy_file),
             DEVICELEASE_T3_DB=str(root / "t3.sqlite"),
             DEVICELEASE_CLAUDE_SESSIONS=str(root / "sessions"),
+            DEVICELEASE_WATCHER="off",
+            DEVICELEASE_CLAUDE="false",
         )
 
     def set_devices(self, devices):
