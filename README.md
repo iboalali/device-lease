@@ -44,7 +44,7 @@ devicelease help                        # the full guide
 | `queue <id>` | Waits for a taken device. If it is free, claims it right away. When the device frees up, it is claimed for the first waiter in line, and the waiter is told. `--any` with `--emulator`, `--physical` and `--min-api N` waits for the first matching device. See "Wait for a taken device". |
 | `unqueue [<id>]` | Leaves the queue. `--any` leaves the queue for any device, `--all` leaves every queue. |
 | `release [<id>]` | Frees your claim. Without an ID it frees your only claim. `--all` frees every claim you hold. `--force <id>` frees another session's claim after a confirmation (`--yes` skips it). |
-| `status [--json]` | Every claim, including stale ones, with owner, project and age. |
+| `status [--json]` | Every claim, including stale ones, with owner, project and age, and every queue entry. `--watch` redraws it like `list --watch`. |
 | `whoami [--json]` | Who devicelease thinks you are, your project, the policy that applies and the devices you may use. |
 | `serial` | Prints the current adb serial of your single claimed device. An emulator's serial changes on every boot, so use this instead of remembering it. |
 | `check <id or serial>` | Exits 0 if you hold the device, 1 otherwise. For scripts. |

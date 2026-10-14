@@ -37,9 +37,8 @@ def _owner_label(lease: Lease, owner: str) -> str:
     return f"{label} (you)" if owner in lease.owner.ids else label
 
 
-def cmd_list(lease: Lease, args) -> int:
-    if not args.watch:
-        return _list(lease, args)
+def _watch(name: str, show, lease: Lease, args) -> int:
+    """Redraws a command's output in place until Ctrl-C."""
     if args.json:
         raise LeaseError("--watch takes no --json")
     clear = "\033[H\033[2J" if sys.stdout.isatty() else ""
@@ -48,16 +47,22 @@ def cmd_list(lease: Lease, args) -> int:
             frame = io.StringIO()
             with redirect_stdout(frame):
                 try:
-                    _list(lease, args)
+                    show(lease, args)
                 except (DiscoveryError, PolicyError) as e:
                     print(f"devicelease: {e}")
-            sys.stdout.write(f"{clear}devicelease list at {time.strftime('%H:%M:%S')}, "
+            sys.stdout.write(f"{clear}devicelease {name} at {time.strftime('%H:%M:%S')}, "
                              f"every {args.interval:g}s (Ctrl-C stops)\n\n{frame.getvalue()}")
             sys.stdout.flush()
             time.sleep(args.interval)
             lease._devices = None
     except KeyboardInterrupt:
         return 0
+
+
+def cmd_list(lease: Lease, args) -> int:
+    if args.watch:
+        return _watch("list", _list, lease, args)
+    return _list(lease, args)
 
 
 def _list(lease: Lease, args) -> int:
@@ -172,6 +177,12 @@ def cmd_release(lease: Lease, args) -> int:
 
 
 def cmd_status(lease: Lease, args) -> int:
+    if args.watch:
+        return _watch("status", _status, lease, args)
+    return _status(lease, args)
+
+
+def _status(lease: Lease, args) -> int:
     claims = lease.store.all()
     online = lease.online_ids() if any(c.human for c in claims) else None
     entries = [(c, lease.stale(c, online)) for c in claims]
@@ -415,10 +426,12 @@ def build_parser() -> argparse.ArgumentParser:
         p.set_defaults(handler=handler)
         return p
 
-    p = add("list", cmd_list, "list every known device and who holds it")
-    p.add_argument("--watch", action="store_true", help="redraw the list until Ctrl-C")
-    p.add_argument("--interval", type=float, default=2, metavar="SECONDS",
-                   help="with --watch: seconds between redraws (default 2)")
+    def add_watch(p):
+        p.add_argument("--watch", action="store_true", help="redraw the output until Ctrl-C")
+        p.add_argument("--interval", type=float, default=2, metavar="SECONDS",
+                       help="with --watch: seconds between redraws (default 2)")
+
+    add_watch(add("list", cmd_list, "list every known device and who holds it"))
 
     p = add("claim", cmd_claim, "claim a device for this session")
     p.add_argument("device", nargs="?", help="device ID (AVD name or adb serial)")
@@ -454,7 +467,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--any", action="store_true", help="leave the queue for any device")
     p.add_argument("--all", action="store_true", help="leave every queue you are in")
 
-    add("status", cmd_status, "show all claims, including stale ones, and the queue")
+    add_watch(add("status", cmd_status, "show all claims, including stale ones, and the queue"))
     add("heartbeat", cmd_heartbeat, "refresh this owner's claims")
     add("whoami", cmd_whoami, "show the resolved owner, project and allowed devices")
     add("serial", cmd_serial, "print the serial of this owner's single claimed device")

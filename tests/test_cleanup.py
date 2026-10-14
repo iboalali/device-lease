@@ -151,6 +151,17 @@ class CliCleanupTest(unittest.TestCase):
         self.assertIn("uitest_api37", out)
         self.assertIn("--watch takes no --json", self.cli("list", "--watch", "--json").stdout)
 
+    def test_status_watch_redraws_until_interrupted(self):
+        process = subprocess.Popen([sys.executable, "-m", "devicelease", "status", "--watch",
+                                    "--interval", "0.2"], cwd=self.cwd, env=self.env,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        time.sleep(2)
+        process.send_signal(signal.SIGINT)
+        out, _ = process.communicate(timeout=10)
+        self.assertEqual(process.returncode, 0)
+        self.assertGreater(out.count("devicelease status at"), 1)
+        self.assertIn("No claims.", out)
+
 
 if __name__ == "__main__":
     unittest.main()

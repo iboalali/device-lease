@@ -74,8 +74,9 @@ COMMANDS
       Frees your claim. Without an ID it frees your only claim.
   release --force <id> [--yes]
       Frees another session's claim, after a confirmation. Only when the user asks.
-  status [--json]
-      Every claim, including stale ones, and every queue entry.
+  status [--json] [--watch [--interval SECONDS]]
+      Every claim, including stale ones, and every queue entry. --watch redraws it every
+      2 seconds until Ctrl-C.
   whoami [--json]
       Your owner ID, project, policy and the devices you may use.
   serial

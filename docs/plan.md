@@ -130,7 +130,7 @@ Done when a session that has not claimed a device is blocked from `adb -s 0A1B2C
 
 ### Phase 5: polish
 
-- `devicelease list --watch` for a terminal pane, and cleanup of the state folder. Designed in [cleanup-plan.md](cleanup-plan.md).
+- `devicelease list --watch` and `status --watch` for a terminal pane, and cleanup of the state folder. Designed in [cleanup-plan.md](cleanup-plan.md).
 - No auto-claim on first use, and no iOS.
 
 ## Limits
