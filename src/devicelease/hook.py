@@ -158,8 +158,9 @@ def heartbeat(data: dict) -> None:
 
 def session_end(data: dict) -> None:
     lease = _lease(data)
-    # T3 Code restarts the `claude` process between turns of one thread, so a session ending does
-    # not mean the thread is done. Its claims end when the thread is settled instead.
+    # T3 Code stops a thread's idle `claude` process after about 30 minutes and starts a new one
+    # when the thread goes on, so a session ending does not mean the thread is done. Its claims
+    # end when the thread is settled instead.
     if lease.owner.t3_thread:
         return
     lease.unqueue(everything=True)

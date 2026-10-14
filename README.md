@@ -71,6 +71,7 @@ When a device is taken, the message says how to wait for it, worded for where th
 - The waiter's own policy decides which devices it may get.
 - An entry ends with its owner (session exits, thread settled), with `unqueue`, or 10 minutes after the last poll of its `--wait`.
 - A session that got a device from the queue is also told on its next devicelease command or Bash call, if no message reached it.
+- A session in `bypassPermissions` mode holds a message from a sender in any other mode until you approve it. So the sender runs in `bypassPermissions` mode for such a waiter, and in `manual` mode otherwise. `--tools SendMessage` and `--strict-mcp-config` leave it no other tool, in either mode.
 
 ### Who owns a claim
 
@@ -122,7 +123,8 @@ This adds five hooks to `~/.claude/settings.json`, with a backup next to it. The
 - **T3 Code's `device_open`** claims the device it opens, and is blocked if another session holds it. **`device_close`** releases it.
 - **After every Bash or device tool call** the session's claims are refreshed.
 - **After every Bash or device tool call** a session that the queue handed a device is told so, once.
-- **When a session ends** its claims are released and it leaves the queue. Inside T3 Code the thread keeps them until it is settled, because T3 Code restarts the `claude` process between turns.
+- **When a session ends** its claims are released and it leaves the queue. Inside T3 Code the thread keeps them until it is settled, because T3 Code stops a thread's idle `claude` process after about 30 minutes and starts a new one when the thread goes on.
+- **Every hook** records the session's permission mode, which decides the mode of the queue's message sender.
 
 A hook that fails lets the tool call through, so a broken devicelease never blocks your work.
 
@@ -170,6 +172,7 @@ devicelease release --all
 |---|---|
 | `~/.local/state/devicelease/claims/` | One JSON file per claimed device (`DEVICELEASE_STATE_DIR` moves it). |
 | `~/.local/state/devicelease/queue/` | One JSON file per queue entry. |
+| `~/.local/state/devicelease/sessions/` | Each Claude Code session's permission mode, recorded by the hooks. |
 | `~/.local/state/devicelease/logs/` | Emulator boot logs, `agent-device close` calls, queue messages (`notify.log`) and the watcher's output. |
 
 The folder cleans itself. `gc` does it, and so does any sweep, at most once an hour:
@@ -177,6 +180,7 @@ The folder cleans itself. `gc` does it, and so does any sweep, at most once an h
 - `notify.log`, `watcher.log` and `agent-device.log` are rotated to `<name>.1` once they pass 5 MiB.
 - A running emulator's boot log is emptied once it passes 50 MiB. The boot log of an emulator not used for 7 days is deleted.
 - Temp files left by a process that died mid-write, and claim or queue files that cannot be read, are deleted after an hour.
+- A session's permission-mode record is deleted when the session has not been seen for 7 days.
 | `~/.config/devicelease/policy.json` | The policy (`DEVICELEASE_POLICY` moves it). |
 
 ## Limits
