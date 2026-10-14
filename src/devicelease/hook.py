@@ -9,6 +9,7 @@ import os
 import re
 import sys
 
+from devicelease import notify
 from devicelease.bashparse import EXPLICIT, IMPLICIT, Target, device_targets
 from devicelease.claims import Claim
 from devicelease.lease import Lease, LeaseError
@@ -177,6 +178,7 @@ HANDLERS = {
 def run(name: str) -> int:
     try:
         data = json.load(sys.stdin)
+        notify.remember_mode(data.get("session_id"), data.get("permission_mode"))
         HANDLERS[name](data)
     except Exception as e:  # noqa: BLE001 - a broken hook must not block the session
         print(f"devicelease hook {name} failed, allowing the tool call: {e!r}", file=sys.stderr)

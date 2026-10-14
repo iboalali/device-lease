@@ -9,6 +9,7 @@ Files in `~/.local/state/devicelease/` that grow or pile up, and what happens to
 | Append-only logs (`notify.log`, `watcher.log`, `agent-device.log`) | Before a write, a log over 5 MiB is renamed to `<name>.1`, replacing the previous copy. At most 10 MiB per log. |
 | Emulator boot logs (`logs/<avd>.log`) | Opened in append mode, so another process can trim them while the emulator writes. A running emulator's log over 50 MiB is emptied. The log of an AVD that is not running and was not written for 7 days is deleted. |
 | Temp files (`.tmp-*` in `claims/` and `queue/`) | Deleted when older than 1 hour. A process that died mid-write leaves them. |
+| Permission-mode records (`sessions/<id>.json`) | Deleted when not written for 7 days. |
 | Unreadable claim and queue files | Deleted when older than 1 hour. Every write is atomic, so such a file is broken for good, and it makes every command print a warning. |
 
 - `devicelease gc` always runs the cleanup. Every sweep runs it too, at most once an hour: the mtime of `state/.cleanup` records the last run, so a sweep that is not due costs one `stat`.

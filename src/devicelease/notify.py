@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 
 from devicelease import claude_sessions, cleanup, paths
-from devicelease.claims import Claim, format_time, now
+from devicelease.claims import Claim, format_time, now, write_temp
 
 SENT = "sent"
 GONE = "gone"
@@ -26,6 +26,32 @@ FAILED = "failed"
 
 SEND_TIMEOUT = 60
 RETRIES = 2
+
+BYPASS = "bypassPermissions"
+"""A session in this mode holds messages from a sender in any other mode for the user's approval.
+Senders in every other mode reach every other mode directly."""
+
+
+def remember_mode(session_id: str | None, mode: str | None) -> None:
+    """Records a session's permission mode, from the hook input, for sending to it later."""
+    if not session_id or not mode:
+        return
+    path = paths.sessions_dir() / f"{session_id}.json"
+    try:
+        if json.loads(path.read_text()).get("permissionMode") == mode:
+            return
+    except (OSError, ValueError, AttributeError):
+        pass
+    path.parent.mkdir(parents=True, exist_ok=True)
+    os.replace(write_temp(path.parent, {"permissionMode": mode}), path)
+
+
+def recorded_mode(session_id: str) -> str | None:
+    try:
+        return json.loads((paths.sessions_dir() / f"{session_id}.json").read_text()) \
+            .get("permissionMode")
+    except (OSError, ValueError, AttributeError):
+        return None
 
 
 def _log(line: str) -> None:
@@ -98,9 +124,12 @@ def send(session_id: str, text: str) -> str:
     if command is None:
         _log("claude not found; set DEVICELEASE_CLAUDE")
         return FAILED
-    command += ["-p", "--model", "haiku", "--permission-mode", "manual",
-                "--output-format", "stream-json", "--verbose", "--no-session-persistence",
-                "--allowedTools", "SendMessage"]
+    # SendMessage is the only tool: --tools removes the other built-in ones and
+    # --strict-mcp-config every MCP server, which matters most in bypass mode.
+    mode = BYPASS if recorded_mode(session_id) == BYPASS else "manual"
+    command += ["-p", "--model", "haiku", "--permission-mode", mode,
+                "--tools", "SendMessage", "--allowedTools", "SendMessage", "--strict-mcp-config",
+                "--output-format", "stream-json", "--verbose", "--no-session-persistence"]
     env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CODE_SESSION_ID"}
     backoff = float(os.environ.get("DEVICELEASE_NOTIFY_BACKOFF_SECONDS", "5"))
     for attempt in range(RETRIES + 1):

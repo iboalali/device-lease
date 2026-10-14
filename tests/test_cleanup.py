@@ -84,6 +84,15 @@ class CleanupTest(unittest.TestCase):
         self.assertTrue(valid.exists())
         self.assertEqual(done[str(broken)], "deleted, unreadable")
 
+    def test_old_session_records(self):
+        sessions = self.state / "sessions"
+        sessions.mkdir()
+        old = self.file(sessions / "s-1.json", "{}", mtime=OLD)
+        recent = self.file(sessions / "s-2.json", "{}")
+        cleanup.run(set())
+        self.assertFalse(old.exists())
+        self.assertTrue(recent.exists())
+
     def test_due_after_an_hour(self):
         self.assertTrue(cleanup.due())
         cleanup.run(set())

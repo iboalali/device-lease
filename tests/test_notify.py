@@ -1,5 +1,6 @@
 import fcntl
 import json
+import subprocess
 import sys
 import time
 import unittest
@@ -66,12 +67,27 @@ class NotifyTest(QueueBase):
         argv = " ".join(call["argv"])
         self.assertIn("--model haiku", argv)
         self.assertIn("--permission-mode manual", argv)
+        self.assertIn("--tools SendMessage", argv)
         self.assertIn("--allowedTools SendMessage", argv)
+        self.assertIn("--strict-mcp-config", argv)
         self.assertIn("to` set to exactly uds:/run/s-1.sock and", call["prompt"])
         self.assertIn("uitest_api37 is free and now yours (serial emulator-5554)", call["prompt"])
         claim = self.claim_of("uitest_api37")
         self.assertEqual((claim["notifySession"], claim["handoffPending"]), (None, False))
         self.assertNotIn("handed", self.cli("serial", owner="session:s-1", check=True).stderr)
+
+    def test_bypass_session_gets_a_bypass_sender(self):
+        self.cli("claim", "uitest_api37", check=True)
+        self.register_session("s-1")
+        data = {"session_id": "s-1", "cwd": str(self.workdir),
+                "permission_mode": "bypassPermissions"}
+        subprocess.run([sys.executable, "-m", "devicelease", "hook", "heartbeat"],
+                       input=json.dumps(data), env=self.env, text=True, check=True, timeout=30)
+        self.cli("queue", "uitest_api37", owner="session:s-1", check=True)
+        self.cli("release", check=True)
+        self.cli("watch", "--once", check=True)
+        [call] = self.claude_calls()
+        self.assertIn("--permission-mode bypassPermissions", " ".join(call["argv"]))
 
     def test_ended_session_passes_the_device_on(self):
         self.hand_to("s-1", "s-2")

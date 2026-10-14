@@ -15,7 +15,7 @@ When a session wants a device another session holds, devicelease tells it what i
 | Other waiters (Codex, opencode, scripts, `--owner me`) | `--wait` only | Nothing can message them. |
 | Wait limit | `--wait` exits by itself after 1h55m with a "still queued, run it again" line | Bash `run_in_background` stops a command at 2 hours. One notification every 2 hours beats Monitor's re-arm every 30 minutes. |
 | T3 Code message fallback | Not built | It would need T3 Code's internal `thread.turn.start` command on its local server. Revisit if T3 waiters turn out to be unreachable. A headless `SendMessage` also reaches a T3 thread while its `claude` process runs, so that is the first fallback to try. |
-| Headless run | `claude -p --model haiku --permission-mode manual`, `SendMessage` as the only allowed tool | Cheap (about $0.007 and 5 seconds per message). Senders in `auto` and `manual` mode both arrive as `from-mode="prompting"` and are delivered directly, so the waiter's permission mode is not needed. |
+| Headless run | `claude -p --model haiku`, in `bypassPermissions` mode when the waiter runs in it and in `manual` mode otherwise, with `SendMessage` as its only tool | Cheap (about $0.007 and 5 seconds per message). Senders in `auto`, `manual` and `plan` mode all arrive as `from-mode="prompting"` and reach those modes directly. A receiver in `bypassPermissions` mode holds them for the user's approval, but takes a sender in its own mode directly. |
 
 ## Concepts
 
@@ -59,12 +59,14 @@ Nothing runs when a claim goes stale: a T3 thread is settled, a heartbeat times 
 After a hand-off to a `message` entry:
 
 1. **Find the session** in `~/.claude/sessions/*.json` by its `sessionId`, before any model call. It is alive when the file exists and the pid's start time matches `procStart`. If it is gone, release the hand-off, drop the entry and hand the device to the next waiter.
-2. **Send.** Run `claude -p --model haiku --permission-mode manual --output-format stream-json --verbose --no-session-persistence --allowedTools SendMessage`, from the devicelease state folder, with the prompt on stdin (`--allowedTools` takes a list and would swallow a prompt argument). The prompt gives `to` as `uds:` plus the session's `messagingSocketPath`, which is unique even when two sessions share a name, and the exact text: `emulator-5554 is free and now yours (serial emulator-5554). Release it with devicelease release when done.` The `claude` binary comes from `DEVICELEASE_CLAUDE`, else `PATH`.
+2. **Send.** Run `claude -p --model haiku --permission-mode <manual or bypassPermissions> --tools SendMessage --allowedTools SendMessage --strict-mcp-config --output-format stream-json --verbose --no-session-persistence`, from the devicelease state folder, with the prompt on stdin (`--allowedTools` takes a list and would swallow a prompt argument). The prompt gives `to` as `uds:` plus the session's `messagingSocketPath`, which is unique even when two sessions share a name, and the exact text: `emulator-5554 is free and now yours (serial emulator-5554). Release it with devicelease release when done.` The `claude` binary comes from `DEVICELEASE_CLAUDE`, else `PATH`.
 3. **Read the outcome** from the `SendMessage` tool result in the output:
    - `"success": true`: the message is in the session's inbox. Done. A session that holds or refuses the message reports that later, after the headless run has exited, so devicelease cannot see it. The waiter then keeps the claim, finds it on its next command, and loses it through the normal heartbeat rule if it never comes back.
    - Any other result, or the run failed (not logged in, rate limit, timeout after 60 seconds): retry twice with backoff. Then keep the claim, as above.
 
 A hand-off to a `message` entry stores the session ID in the claim (`notifySession`) until the send is done. If the waiter runs a devicelease command or a Bash call first, it is told there, and no message is sent.
+
+The hooks record each session's permission mode from their input in `~/.local/state/devicelease/sessions/<session id>.json`, written only when it changes. The sender runs in `bypassPermissions` mode for a waiter in that mode, so the message is not held for approval. `--tools` and `--strict-mcp-config` leave it no tool but `SendMessage`, so the mode cannot let it do anything else. Records of sessions not seen for 7 days are deleted by the cleanup.
 
 Every send is logged to `~/.local/state/devicelease/logs/notify.log`, and the watcher's own output to `logs/watcher.log`.
 
@@ -93,7 +95,8 @@ Done on 2026-10-14, from a T3 Code thread:
 - The tool result only says the message reached the inbox. Held or refused messages are reported later, in a notice the headless run never sees.
 - The message arrives as a `<cross-session-message>` in a busy session at its next tool round. In an idle session (here a T3 thread whose turn had ended) it starts a new turn.
 - T3 Code stops idle `claude` processes after about 30 minutes: two idle threads left the registry within that time. A thread running a 45-minute background command stayed alive (same pid, about 44 minutes idle) and was woken when the command exited. So `--wait` in the background works in T3 Code.
-- Untested: whether a receiver in `bypassPermissions` mode holds these messages. That needs a session started in that mode.
+- A receiver in `bypassPermissions` mode holds a message from a `manual` sender until the user approves it, and takes one from a `bypassPermissions` sender directly (tested with a terminal session). A headless run in that mode starts without the danger prompt an interactive one shows.
+- `--tools SendMessage` leaves `SendMessage` as the only built-in tool, loaded without `ToolSearch`. MCP servers still load unless `--strict-mcp-config` is given.
 
 ### Phase 1: queue and hand-off
 

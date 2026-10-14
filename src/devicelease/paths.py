@@ -23,6 +23,10 @@ def queue_dir() -> Path:
     return state_dir() / "queue"
 
 
+def sessions_dir() -> Path:
+    return state_dir() / "sessions"
+
+
 def policy_path() -> Path:
     override = os.environ.get("DEVICELEASE_POLICY")
     if override:

@@ -11,6 +11,7 @@ from devicelease import paths
 LOG_LIMIT = 5 * 1024 * 1024
 BOOT_LOG_LIMIT = 50 * 1024 * 1024
 BOOT_LOG_AGE = 7 * 24 * 3600
+SESSION_RECORD_AGE = 7 * 24 * 3600
 LEFTOVER_AGE = 3600
 INTERVAL = 3600
 
@@ -90,6 +91,13 @@ def run(running_avds: set[str] | None) -> list[tuple[str, str]]:
                 done.append((str(path), reason))
             except FileNotFoundError:
                 continue
+    for path in sorted(paths.sessions_dir().glob("*.json")):
+        try:
+            if _age(path, at) > SESSION_RECORD_AGE:
+                path.unlink()
+                done.append((str(path), "deleted, session not seen for 7 days"))
+        except FileNotFoundError:
+            continue
     stamp = state / ".cleanup"
     stamp.touch()
     os.utime(stamp, (at, at))
