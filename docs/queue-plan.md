@@ -111,7 +111,7 @@ Done on 2026-10-14, from a T3 Code thread:
 ### Phase 3: help and docs
 
 - `devicelease help` and its coverage test.
-- README, `docs/plan.md` CLI table, the agent instructions snippet.
+- README, the agent instructions snippet.
 - The device section of the global `~/.claude/AGENTS.md` ("Claim an Android device before using it") shrinks to a mention of devicelease, the rules that matter on every device command, and a pointer to `devicelease help` for everything else. It changes only once `devicelease help` exists, so agents are never sent to a command that fails.
 
 Done when: thread A holds a device, thread B in T3 Code queues with `--wait` in the background and ends its turn, A releases, and B wakes up holding the device. The same for a Claude Code terminal session, which gets a message. And `devicelease help` explains both.
