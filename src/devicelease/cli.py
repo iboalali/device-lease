@@ -132,15 +132,19 @@ def cmd_claim(lease: Lease, args) -> int:
     if args.any == bool(args.device):
         raise LeaseError("name a device or pass --any")
     if args.any:
-        if args.boot or args.no_snapshot:
-            raise LeaseError("--boot and --no-snapshot need a device name")
+        if args.boot or args.no_snapshot or args.emulator_args:
+            raise LeaseError("--boot, --no-snapshot and emulator arguments need a device name")
         kind = PHYSICAL if args.physical else EMULATOR if args.emulator else None
         claim, already = lease.claim_any(kind, args.min_api, args.note), False
     else:
         if args.physical or args.emulator or args.min_api is not None:
             raise LeaseError("--physical, --emulator and --min-api only apply with --any")
-        claim, already = lease.claim(args.device, args.note, args.boot or args.no_snapshot,
-                                     snapshot=not args.no_snapshot)
+        if any(arg == "-avd" or arg.startswith("@") for arg in args.emulator_args):
+            raise LeaseError(f"the emulator boots the claimed AVD {args.device}; "
+                             f"leave -avd and @name out of the arguments after --")
+        boot = args.boot or args.no_snapshot or bool(args.emulator_args)
+        claim, already = lease.claim(args.device, args.note, boot, snapshot=not args.no_snapshot,
+                                     emulator_args=args.emulator_args)
     if args.json:
         _print_json({**claim.to_dict(), "alreadyHeld": already})
     else:
@@ -441,7 +445,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--physical", action="store_true", help="with --any: physical devices only")
     p.add_argument("--emulator", action="store_true", help="with --any: emulators only")
     p.add_argument("--min-api", type=int, metavar="N", help="with --any: API level N or higher")
-    p.add_argument("--boot", action="store_true", help="start the emulator after claiming it")
+    p.add_argument("--boot", action="store_true",
+                   help="start the emulator after claiming it, with the host GPU; arguments "
+                        "after -- go to the emulator and imply --boot")
     p.add_argument("--no-snapshot", action="store_true",
                    help="like --boot, but cold boot without loading or saving a snapshot")
     p.add_argument("--note", help="free text stored with the claim")
@@ -519,6 +525,8 @@ def main(argv: list[str] | None = None) -> int:
         if not command:
             parser.error("exec needs a command after --")
         args.cmd = command
+    elif args.command == "claim":
+        args.emulator_args = command
     elif command:
         parser.error("unexpected arguments after --")
     if args.command == "hook":

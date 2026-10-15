@@ -168,26 +168,35 @@ def find(devices: list[Device], target: str) -> Device | None:
     return None
 
 
-def boot_emulator(avd: str, log_path: Path, timeout: float = 240, snapshot: bool = True) -> str:
+def boot_emulator(avd: str, log_path: Path, timeout: float = 240, snapshot: bool = True,
+                  extra_args: list[str] = ()) -> str:
     """Starts an emulator, waits until Android finished booting and returns its serial.
 
     Without `snapshot` it cold boots and neither loads nor saves the Quick Boot snapshot.
+    `extra_args` go to the emulator as they are. It renders with the host GPU unless they
+    pass their own `-gpu`.
     """
     emulator = paths.emulator_path()
     if emulator is None:
         raise DiscoveryError("emulator not found; set ANDROID_HOME or DEVICELEASE_EMULATOR")
+    default_gpu = "-gpu" not in extra_args
+    command = [emulator, "-avd", avd, *(["-gpu", "host"] if default_gpu else []),
+               *([] if snapshot else ["-no-snapshot"]), *extra_args]
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_path.unlink(missing_ok=True)
     # Append mode, so the cleanup can empty the log while the emulator still writes to it.
     with open(log_path, "a") as log:
         process = subprocess.Popen(
-            [emulator, "-avd", avd, *([] if snapshot else ["-no-snapshot"])], stdin=subprocess.DEVNULL, stdout=log,
-            stderr=subprocess.STDOUT, start_new_session=True,
+            command, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+            start_new_session=True,
         )
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if process.poll() not in (None, 0):
-            raise DiscoveryError(f"emulator {avd} exited with code {process.returncode}; see {log_path}")
+        if process.poll() is not None:
+            hint = (". If the host GPU is the problem, boot it with `-- -gpu auto`"
+                    if default_gpu and process.returncode != 0 else "")
+            raise DiscoveryError(f"emulator {avd} exited with code {process.returncode} before "
+                                 f"it finished booting; see {log_path}{hint}")
         for serial, state, _ in _adb_devices():
             if state != "device" or not serial.startswith("emulator-"):
                 continue

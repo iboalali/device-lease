@@ -155,6 +155,22 @@ class CliTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("need a device name", result.stderr)
 
+    def test_emulator_args_need_a_device_name(self):
+        result = self.run_cli("claim", "--any", "--", "-gpu", "auto")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("need a device name", result.stderr)
+
+    def test_emulator_args_cannot_name_another_avd(self):
+        for args in (["-avd", "uitest_api36"], ["@uitest_api36"]):
+            result = self.run_cli("claim", "Pixel_6a", "--", *args)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("leave -avd and @name out", result.stderr)
+
+    def test_other_commands_reject_args_after_double_dash(self):
+        result = self.run_cli("list", "--", "-gpu", "auto")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("unexpected arguments after --", result.stderr)
+
     def test_expired_claim_is_taken_over(self):
         self.run_cli("claim", "uitest_api37", check=True)
         claim_file = Path(self.env["DEVICELEASE_STATE_DIR"]) / "claims" / "uitest_api37.json"

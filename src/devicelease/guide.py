@@ -12,8 +12,10 @@ USE A DEVICE
   2. devicelease claim <id>
        Claims one device, by AVD name or adb serial. `devicelease claim --any` takes
        the first free one, emulators before phones. `devicelease claim <avd> --boot`
-       claims a stopped emulator and starts it. `--no-snapshot` instead of `--boot`
-       cold boots it, without loading or saving the Quick Boot snapshot.
+       claims a stopped emulator and starts it with the host GPU. `--no-snapshot`
+       instead of `--boot` cold boots it, without loading or saving the Quick Boot
+       snapshot. Arguments after `--` go to the emulator and imply `--boot`:
+       `devicelease claim <avd> -- -gpu auto` boots without the host GPU.
        Run the claim as its own command. Hooks check a whole command before any part
        of it runs, so `devicelease claim X && adb -s X ...` is still blocked.
   3. Name the device in every command:
@@ -61,10 +63,11 @@ COMMANDS
       Every device adb and the AVD folder know about: kind, API level, state and lease
       (free, yours, taken by ..., not allowed here), and how many sessions wait for it.
       --watch redraws it every 2 seconds until Ctrl-C, for a terminal pane.
-  claim <id> [--boot|--no-snapshot] [--note TEXT]
+  claim <id> [--boot|--no-snapshot] [--note TEXT] [-- EMULATOR ARGS]
       Claims one device. Fails with the holder's name if the device is taken.
-      --boot starts a stopped emulator. --no-snapshot cold boots it instead, without
-      loading or saving the Quick Boot snapshot.
+      --boot starts a stopped emulator with `-gpu host`. --no-snapshot cold boots it
+      instead, without loading or saving the Quick Boot snapshot. Arguments after --
+      go to the emulator and imply --boot. A `-gpu` there replaces `-gpu host`.
   claim --any [--emulator|--physical] [--min-api N] [--note TEXT]
       Claims the first free, allowed, running device that matches.
   queue <id> | --any [--emulator|--physical] [--min-api N]  [--wait [--timeout MIN]]
