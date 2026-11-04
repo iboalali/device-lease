@@ -195,6 +195,21 @@ class QueueTest(QueueBase):
         self.cli("release", check=True)
         self.assertEqual(self.holders(), {"uitest_api37": "s-2"})
 
+    def test_session_of_another_account_stays_queued(self):
+        home = self.root / "home"
+        (home / ".claude" / "sessions").mkdir(parents=True)
+        other_registry = home / ".claude-private" / "sessions"
+        other_registry.mkdir(parents=True)
+        del self.env["DEVICELEASE_CLAUDE_SESSIONS"]
+        self.env["HOME"] = str(home)
+        self.cli("claim", "uitest_api37", check=True)
+        self.register_session("s-1")
+        (self.registry / "s-1.json").rename(other_registry / "s-1.json")
+        self.cli("queue", "uitest_api37", owner="session:s-1", check=True)
+
+        self.cli("release", check=True)
+        self.assertEqual(self.holders(), {"uitest_api37": "s-1"})
+
     def test_settled_thread_leaves_the_queue(self):
         db = Path(self.env["DEVICELEASE_T3_DB"])
         create_db(db)
