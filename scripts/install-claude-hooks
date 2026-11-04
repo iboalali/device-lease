@@ -13,10 +13,11 @@ from pathlib import Path
 SETTINGS = Path.home() / ".claude" / "settings.json"
 COMMAND = str(Path.home() / ".local" / "bin" / "devicelease") + " hook "
 
+# pre-device-open may boot an emulator, which takes up to the 240 s boot timeout.
 HOOKS = {
     "PreToolUse": [
         ("Bash", "pre-bash"),
-        ("mcp__t3-code__device_open", "pre-device-open"),
+        ("mcp__t3-code__device_open", "pre-device-open", 300),
     ],
     "PostToolUse": [
         ("mcp__t3-code__device_close", "post-device-close"),
@@ -37,8 +38,9 @@ def main() -> int:
     hooks = settings.setdefault("hooks", {})
     for event, entries in HOOKS.items():
         groups = [g for g in hooks.get(event, []) if not is_ours(g)]
-        for matcher, name in entries:
-            group = {"hooks": [{"type": "command", "command": COMMAND + name, "timeout": 30}]}
+        for matcher, name, *timeout in entries:
+            group = {"hooks": [{"type": "command", "command": COMMAND + name,
+                                "timeout": timeout[0] if timeout else 30}]}
             if matcher:
                 group = {"matcher": matcher, **group}
             groups.append(group)

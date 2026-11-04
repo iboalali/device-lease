@@ -30,7 +30,7 @@ USE A DEVICE
        Frees the device when you are done.
 
   In T3 Code, device_open with a deviceId claims that device for the thread, and
-  device_close releases it.
+  device_close releases it. A stopped emulator is booted with the host GPU first.
 
 WHEN THE DEVICE IS TAKEN
 

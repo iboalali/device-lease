@@ -12,12 +12,17 @@ import sys
 from devicelease import notify
 from devicelease.bashparse import EXPLICIT, IMPLICIT, Target, device_targets
 from devicelease.claims import Claim
+from devicelease.devices import EMULATOR, STOPPED, DiscoveryError, find
 from devicelease.lease import Lease, LeaseError
 
 GUIDE = ("Run `devicelease list`, claim a device with `devicelease claim <id>` "
          "(or `devicelease claim --any`), then target it: `adb -s <serial>`, "
          "`android ... --device=<serial>`, or `devicelease exec -- ./gradlew ...`. "
          "`devicelease help` explains it all.")
+
+
+HUB_EMULATOR_ARGS = ["-no-window", "-no-audio"]
+"""How the hook boots an emulator for T3 Code's device panel, which shows it without a window."""
 
 
 def _lease(data: dict) -> Lease:
@@ -85,6 +90,17 @@ def _judge(lease: Lease, target: Target) -> str | None:
             f"{_implicit_hint(lease, target, mine)}")
 
 
+def _gpu_problem(target: Target) -> str | None:
+    """Emulators render with the host GPU. Without `-gpu` the AVD's own setting applies, which
+    is usually `auto` and falls back to software rendering when the emulator runs headless."""
+    if not target.boots or target.gpu:
+        return None
+    avd = target.device or "<avd>"
+    return (f"`{_shorten(target.command)}` boots an emulator without `-gpu host`, so it may render "
+            f"in software. Boot it with `devicelease claim {avd} --boot` (add "
+            f"`-- -no-window -no-audio` for no window), or pass `-gpu` yourself.")
+
+
 def pre_bash(data: dict) -> None:
     command = (data.get("tool_input") or {}).get("command") or ""
     env = {"ANDROID_SERIAL": os.environ["ANDROID_SERIAL"]} if os.environ.get("ANDROID_SERIAL") else {}
@@ -92,7 +108,7 @@ def pre_bash(data: dict) -> None:
     if not targets:
         return
     lease = _lease(data)
-    problems = [p for p in (_judge(lease, t) for t in targets) if p]
+    problems = [p for t in targets for p in (_judge(lease, t), _gpu_problem(t)) if p]
     if problems:
         if re.search(r"devicelease\s+claim\b", command):
             problems.append("This check runs before any part of the command, so a claim in the "
@@ -123,13 +139,28 @@ def pre_device_open(data: dict) -> None:
         _deny(f"devicelease: device_open needs a deviceId, so the device can be claimed. "
               f"{suggestion}")
         return
+    device = find(lease.devices, device_id)
+    # T3 Code boots a stopped emulator with `-gpu auto`, which renders in software. Booting it
+    # here with the host GPU first lets device_open attach to the running emulator instead.
+    boot = device is not None and device.kind == EMULATOR and device.state == STOPPED
     try:
-        lease.claim(device_id, t3_device=device_id)
-    except LeaseError as e:
+        claim, _ = lease.claim(device_id, t3_device=device_id, boot=boot,
+                               emulator_args=HUB_EMULATOR_ARGS if boot else ())
+        if boot and claim.serial:
+            lease.claim(device_id, t3_device=claim.serial)
+    except (LeaseError, DiscoveryError) as e:
         message = str(e).rstrip(".") + "."
         if "devicelease list" not in message:
             message += " Run `devicelease list` to see free devices."
         _deny(f"devicelease: {message}")
+        return
+    if boot and claim.serial:
+        # T3 Code lists a stopped emulator by its AVD name and a running one by its serial.
+        json.dump({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "updatedInput": {**data["tool_input"], "deviceId": claim.serial},
+        }}, sys.stdout)
 
 
 def post_device_close(data: dict) -> None:

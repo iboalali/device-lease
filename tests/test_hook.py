@@ -125,7 +125,29 @@ class HookTest(unittest.TestCase):
     def test_booting_an_emulator_needs_a_claim(self):
         self.assertIn("you have not claimed Pixel_6a", self.bash("emulator -avd Pixel_6a"))
         self.cli("claim", "Pixel_6a")
-        self.assertIsNone(self.bash("emulator -avd Pixel_6a"))
+        self.assertIsNone(self.bash("emulator -avd Pixel_6a -gpu host"))
+
+    def test_booting_an_emulator_needs_a_gpu(self):
+        self.cli("claim", "Pixel_6a")
+        reason = self.bash("emulator -avd Pixel_6a -no-window")
+        self.assertIn("without `-gpu host`", reason)
+        self.assertIn("devicelease claim Pixel_6a --boot", reason)
+        self.assertIn("without `-gpu host`", self.bash("android emulator start Pixel_6a"))
+        self.assertIsNone(self.bash("emulator -avd Pixel_6a -gpu swiftshader_indirect"))
+        self.assertIsNone(self.bash("android emulator stop Pixel_6a"))
+
+    def test_device_open_boots_a_stopped_emulator_with_the_host_gpu(self):
+        args_file = Path(self.tmp.name) / "emulator-args"
+        emulator = Path(self.tmp.name) / "emulator"
+        emulator.write_text(f'#!/bin/sh\necho "$@" > {args_file}\nexit 1\n')
+        emulator.chmod(0o755)
+        self.env["DEVICELEASE_EMULATOR"] = str(emulator)
+        output = self.hook("pre-device-open", tool_name="mcp__t3-code__device_open",
+                           tool_input={"deviceId": "Pixel_6a"})
+        self.assertIn("exited with code 1", output["hookSpecificOutput"]["permissionDecisionReason"])
+        self.assertEqual(args_file.read_text().split(),
+                         ["-avd", "Pixel_6a", "-gpu", "host", "-no-window", "-no-audio"])
+        self.assertEqual(self.holders(), {})
 
     def test_device_open_claims_and_device_close_releases(self):
         self.assertIsNone(self.hook("pre-device-open", tool_name="mcp__t3-code__device_open",
@@ -139,6 +161,27 @@ class HookTest(unittest.TestCase):
         self.hook("post-device-close", tool_name="mcp__t3-code__device_close",
                   tool_input={"deviceId": "emulator-5554"})
         self.assertEqual(self.holders(), {})
+
+    def test_device_open_is_pointed_at_the_booted_emulators_serial(self):
+        root = Path(self.tmp.name)
+        emulator, adb = root / "emulator", root / "adb"
+        emulator.write_text("#!/bin/sh\nexec sleep 5\n")
+        adb.write_text(
+            "#!/bin/sh\n"
+            'case "$*" in\n'
+            '  "devices -l") printf "List of devices attached\\nemulator-5560 device\\n" ;;\n'
+            '  *"emu avd name"*) printf "Pixel_6a\\nOK\\n" ;;\n'
+            '  *sys.boot_completed*) echo 1 ;;\n'
+            "esac\n")
+        for tool in (emulator, adb):
+            tool.chmod(0o755)
+        self.env.update(DEVICELEASE_EMULATOR=str(emulator), DEVICELEASE_ADB=str(adb))
+        output = self.hook("pre-device-open", tool_name="mcp__t3-code__device_open",
+                           tool_input={"deviceId": "Pixel_6a", "hostId": "local"})
+        decision = output["hookSpecificOutput"]
+        self.assertEqual(decision["permissionDecision"], "allow")
+        self.assertEqual(decision["updatedInput"], {"deviceId": "emulator-5560", "hostId": "local"})
+        self.assertEqual(self.holders(), {"Pixel_6a": "session-a"})
 
     def test_device_close_keeps_claims_made_with_the_cli(self):
         self.cli("claim", "uitest_api37")

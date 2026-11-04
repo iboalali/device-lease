@@ -122,7 +122,8 @@ This adds five hooks to `~/.claude/settings.json`, with a backup next to it. The
 
 - **Before every Bash command** the command line is checked for device use: `adb -s X`, `ANDROID_SERIAL=X`, `./gradlew connected*`/`install*`/`uninstall*`, `emulator -avd X`, `android ... --device=X`, `scrcpy` and `fastboot`, through pipes, `&&` chains, `$(...)`, backticks and `sh -c`. A command that uses a device the session has not claimed is blocked, and the message says what to run instead. A command that names no device (`adb shell`) is only allowed while the session's own device is the only one online.
 - The check runs before any part of the command, so claim a device in its own command before using it.
-- **T3 Code's `device_open`** claims the device it opens, and is blocked if another session holds it. **`device_close`** releases it.
+- **An emulator boot in Bash** without `-gpu` (`emulator -avd X`, `android emulator start X`) is blocked, because the AVD's own setting is usually `auto`, which renders in software when the emulator runs headless. The message points to `devicelease claim X --boot`.
+- **T3 Code's `device_open`** claims the device it opens, and is blocked if another session holds it. **`device_close`** releases it. A stopped emulator is booted first, headless with the host GPU (`-gpu host -no-window -no-audio`), so T3 Code attaches to it instead of booting it with `-gpu auto`. This hook's timeout is 300 seconds to leave room for the boot.
 - **After every Bash or device tool call** the session's claims are refreshed.
 - **After every Bash or device tool call** a session that the queue handed a device is told so, once.
 - **When a session ends** its claims are released and it leaves the queue. Inside T3 Code the thread keeps them until it is settled, because T3 Code stops a thread's idle `claude` process after about 30 minutes and starts a new one when the thread goes on.

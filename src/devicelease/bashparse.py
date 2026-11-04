@@ -9,7 +9,7 @@ talk to a device.
 import os
 import re
 import shlex
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 EXPLICIT = "explicit"
 """The command names its device."""
@@ -60,6 +60,10 @@ class Target:
     kind: str | None = None
     """For `adb -d` / `adb -e`: only a physical device, or only an emulator, is picked."""
     command: str = ""
+    boots: bool = False
+    """The command starts an emulator."""
+    gpu: str | None = None
+    """The `-gpu` an emulator boot passes, or None when it leaves the choice to the AVD."""
 
     @property
     def self_serial(self) -> bool:
@@ -205,7 +209,7 @@ def _android(words: list[str], env: dict[str, str], line: str) -> list[Target]:
         if len(args) >= 3 and args[1] in ("start", "stop"):
             avd = next((a for a in args[2:] if not a.startswith("-")), None)
             if avd:
-                return [_device("android", avd, line)]
+                return [replace(_device("android", avd, line), boots=args[1] == "start")]
         return []
     if command not in ANDROID_DEVICE_COMMANDS:
         return []
@@ -221,7 +225,10 @@ def _emulator(words: list[str], line: str) -> list[Target]:
     found, avd = _option_value(words, "-avd", "--avd")
     if not found:
         avd = next((w[1:] for w in words[1:] if w.startswith("@") and len(w) > 1), None)
-    return [_device("emulator", avd, line)] if avd else []
+    if not avd:
+        return []
+    _, gpu = _option_value(words, "-gpu", "--gpu")
+    return [replace(_device("emulator", avd, line), boots=True, gpu=gpu)]
 
 
 def _gradle(words: list[str], env: dict[str, str], line: str) -> list[Target]:
