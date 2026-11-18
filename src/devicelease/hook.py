@@ -61,7 +61,9 @@ def guarded_folders() -> tuple[str, ...]:
 
 def handoff_notice(claim: Claim) -> str:
     serial = f" (serial {claim.serial})" if claim.serial and claim.serial != claim.device else ""
-    return (f"{claim.device}{serial} was handed to you from the queue. "
+    boot = (f" It is not running yet: boot it with `devicelease claim {claim.device} --boot`."
+            if claim.kind == EMULATOR and not claim.serial else "")
+    return (f"{claim.device}{serial} was handed to you from the queue.{boot} "
             f"Release it with `devicelease release` when done.")
 
 

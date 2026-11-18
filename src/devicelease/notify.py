@@ -17,7 +17,7 @@ import sys
 import time
 from pathlib import Path
 
-from devicelease import claude_sessions, cleanup, paths
+from devicelease import claude_sessions, cleanup, paths, wipe
 from devicelease.claims import Claim, format_time, now, write_temp
 
 SENT = "sent"
@@ -151,11 +151,27 @@ def send(session_id: str, text: str) -> str:
 
 
 def deliver(lease) -> None:
-    """Sends a message for every hand-off that waits for one."""
+    """Sends a message for every hand-off that waits for one, after booting a pool emulator
+    that came from the queue stopped. Tells waiters for an emulator that failed, and ends their
+    entries."""
+    from devicelease.lease import LeaseError
+    from devicelease.queue import MESSAGE
+
+    for entry in lease.queue.all():
+        failure = wipe.failed(entry.target) if entry.target else None
+        if entry.mode == MESSAGE and failure and entry.claude_session:
+            send(entry.claude_session, "devicelease: you are no longer queued: "
+                 + lease.out_of_rotation_message(entry.target, failure))
+            with lease.store.lock():
+                lease.queue.delete(entry.id)
     for claim in lease.store.all():
         if not claim.notify_session:
             continue
-        outcome = send(claim.notify_session, message_text(claim))
+        try:
+            text = message_text(lease.boot_handed(claim))
+        except LeaseError as e:
+            text = f"devicelease: the queue handed you {claim.device}, but: {e}"
+        outcome = send(claim.notify_session, text)
         with lease.store.lock():
             current = lease.store.read(claim.device)
             if not current or current.queue_entry != claim.queue_entry:

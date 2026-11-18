@@ -14,6 +14,10 @@ from devicelease import queue
 from devicelease.queue import MESSAGE, WAIT, Entry, QueueStore, ended_reason, new_id, queue_args
 
 
+HEADLESS = ["-no-window", "-no-audio"]
+"""How an emulator boots for a T3 Code thread, whose device panel shows it without a window."""
+
+
 class LeaseError(Exception):
     pass
 
@@ -239,11 +243,11 @@ class Lease:
         if not any(self.queue.root.glob("*.json")):
             return []
         try:
-            devices = sorted((d for d in self.devices if d.online and self.in_rotation(d)),
-                             key=lambda d: (d.kind != EMULATOR, d.id))
+            devices = sorted((d for d in self.devices if self._handable(d)),
+                             key=lambda d: (d.kind != EMULATOR, not d.online, d.id))
         except DiscoveryError:
             return []
-        online = {d.id for d in devices}
+        online = {d.id for d in devices if d.online}
         given, replaced, policies = [], [], {}
         with self.store.lock():
             claims = {c.device: c for c in self.store.all()}
@@ -253,14 +257,14 @@ class Lease:
                 if claim and stale_reason(claim, self.expiry, online):
                     self.store.delete(device.id)
                     replaced.append(claim)
-                    if self._wiped_on_end(claim, device):
-                        continue
                     claim = None
                 if claim is None:
                     free.append(device)
             for entry in self.queue.all():
                 if ended_reason(entry):
                     self.queue.delete(entry.id)
+                    continue
+                if entry.target and wipe.failed(entry.target):
                     continue
                 device = next((d for d in free if entry.matches(d)
                                and self._entry_allows(entry, d, policies)), None)
@@ -282,6 +286,29 @@ class Lease:
         if any(c.notify_session for c in given):
             notify.spawn()
         return given
+
+    def _handable(self, device: Device) -> bool:
+        """Whether the queue may hand out the device: a running one, or a stopped pool emulator,
+        which the waiter's side boots (and wipes when it waits for its wipe)."""
+        if device.kind == EMULATOR and wipe.failed(device.id):
+            return False
+        if device.online:
+            return True
+        return (device.kind == EMULATOR and device.state == STOPPED
+                and self.policy.in_pool(device.id, device.name))
+
+    def boot_handed(self, claim: Claim) -> Claim:
+        """Boots a pool emulator that came from the queue stopped, or stopping for its wipe, as
+        the claim's owner. Returns the claim with its new serial. Raises LeaseError when the
+        boot fails."""
+        if claim.kind != EMULATOR or not self.in_pool(claim.device):
+            return claim
+        device = self._find(claim.device)
+        if device is None or (device.online and not wipe.pending(device.id)):
+            return claim
+        lease = self if self.is_mine(claim) else Lease.create(claim.owner, cwd=claim.project)
+        args = HEADLESS if claim.t3_thread else []
+        return lease.claim(claim.device, boot=True, emulator_args=args)[0]
 
     def _wiped_on_end(self, claim: Claim, device: Device) -> bool:
         """Whether ending this claim stops the device for a wipe, so it cannot be handed out."""
@@ -658,6 +685,11 @@ class Lease:
                 if current:
                     current.refreshed_at = queue.now()
                     self.queue.write(current)
+                failure = wipe.failed(entry.target) if entry.target else None
+                if current and failure:
+                    self.queue.delete(entry.id)
+                    raise LeaseError("you are no longer queued: "
+                                     + self.out_of_rotation_message(entry.target, failure))
             if current is None:
                 claim = self._queued_claim(entry.id)
                 return ("yours", claim) if claim else ("ended", None)

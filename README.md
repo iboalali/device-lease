@@ -72,6 +72,8 @@ When a device is taken, the message says how to wait for it, worded for where th
 - `--wait` exits 0 with `<id> is free and now yours (serial ...)`, 3 with "still queued" after 115 minutes (below the 2-hour limit of a background command, run it again to keep the place), and 1 when the entry ended. Ctrl-C leaves the queue.
 - First come, first served, across named and `--any` waiters. A direct `claim` cannot jump the queue.
 - The waiter's own policy decides which devices it may get.
+- A pool emulator is handed over stopped, or while it stops for its wipe. The waiter's side boots it before saying it is yours: `queue --wait` and `queue` themselves, the watcher before its message, and `device_open`. That boot wipes it and runs its `afterWipe` step. A boot that fails is reported instead, as described under Policy.
+- A waiter queued by name for an emulator that fails is told once, with the failure, and leaves the queue.
 - An entry ends with its owner (session exits, thread settled), with `unqueue`, or 10 minutes after the last poll of its `--wait`.
 - A session that got a device from the queue is also told on its next devicelease command or Bash call, if no message reached it.
 - A session in `bypassPermissions` mode holds a message from a sender in any other mode until you approve it. So the sender runs in `bypassPermissions` mode for such a waiter, and in `manual` mode otherwise. `--tools SendMessage` and `--strict-mcp-config` leave it no other tool, in either mode.

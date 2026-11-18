@@ -76,6 +76,28 @@ class NotifyTest(QueueBase):
         self.assertEqual((claim["notifySession"], claim["handoffPending"]), (None, False))
         self.assertNotIn("handed", self.cli("serial", owner="session:s-1", check=True).stderr)
 
+    def test_watcher_boots_a_wiped_emulator_before_the_message(self):
+        bin_dir = self.root / "bin"
+        bin_dir.mkdir()
+        for name, body in (
+                ("emulator", f'echo "$@" >> {self.root}/emulator.log\nexec sleep 3'),
+                ("adb", 'case "$*" in\n'
+                        '  "devices -l") printf "List of devices attached\\nemulator-5570 '
+                        'device\\n" ;;\n'
+                        '  *"emu avd name"*) printf "uitest_api37\\nOK\\n" ;;\n'
+                        '  *sys.boot_completed*) echo 1 ;;\n'
+                        'esac')):
+            (bin_dir / name).write_text(f"#!/bin/sh\n{body}\n")
+            (bin_dir / name).chmod(0o755)
+        (self.root / "policy.json").write_text(json.dumps({"wipeAfterUse": ["uitest_*"]}))
+        self.env.update(DEVICELEASE_EMULATOR=str(bin_dir / "emulator"),
+                        DEVICELEASE_ADB=str(bin_dir / "adb"), DEVICELEASE_NOTIFY="off")
+        self.hand_to("s-1")
+        self.cli("watch", "--once", check=True)
+        [call] = self.claude_calls()
+        self.assertIn("uitest_api37 is free and now yours (serial emulator-5570)", call["prompt"])
+        self.assertIn("-wipe-data", (self.root / "emulator.log").read_text())
+
     def test_bypass_session_gets_a_bypass_sender(self):
         self.cli("claim", "uitest_api37", check=True)
         self.register_session("s-1")

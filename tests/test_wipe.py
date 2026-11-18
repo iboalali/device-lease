@@ -223,6 +223,57 @@ class WipeTest(unittest.TestCase):
         self.ok("gc")
         self.assertTrue(kept.exists())
 
+    def wait_in_background(self, *args, owner):
+        env = dict(self.env, DEVICELEASE_OWNER=owner, DEVICELEASE_POLL_SECONDS="0.2")
+        return subprocess.Popen([sys.executable, "-m", "devicelease", *args], cwd=self.workdir,
+                                env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True)
+
+    def wait_for_entry(self):
+        for _ in range(100):
+            if json.loads(self.ok("status", "--json").stdout)["queue"]:
+                return
+            subprocess.run(["sleep", "0.1"])
+        self.fail("the waiter never queued")
+
+    def test_a_waiter_gets_the_wiped_emulator_booted(self):
+        self.ok("claim", "pool_b")
+        (self.root / "booting").write_text("pool_b")
+        waiter = self.wait_in_background("queue", "pool_b", "--wait", owner="session-b")
+        self.wait_for_entry()
+        self.ok("release", "pool_b")
+        out, err = waiter.communicate(timeout=60)
+        self.assertEqual(waiter.returncode, 0, err)
+        self.assertIn("pool_b is free and now yours", out)
+        self.assertEqual(self.log("emulator")[-1].split(),
+                         ["-avd", "pool_b", "-gpu", "host", "-no-snapshot", "-wipe-data"])
+        self.assertFalse(self.pending("pool_b"))
+
+    def test_queue_boots_a_free_stopped_pool_emulator(self):
+        self.ok("queue", "pool_a", "--wait")
+        self.assertEqual(self.log("emulator")[-1].split(),
+                         ["-avd", "pool_a", "-gpu", "host", "-no-snapshot"])
+
+    def test_a_waiter_for_a_failed_emulator_is_told(self):
+        self.ok("claim", "pool_a")
+        waiter = self.wait_in_background("queue", "pool_a", "--wait", owner="session-b")
+        self.wait_for_entry()
+        (self.state / "failed").mkdir(parents=True, exist_ok=True)
+        (self.state / "failed" / "pool_a").write_text(json.dumps(
+            {"what": "boot", "at": "2026-11-18T10:00:00Z", "log": "/tmp/pool_a.failed.log"}))
+        out, err = waiter.communicate(timeout=60)
+        self.assertEqual(waiter.returncode, 1)
+        self.assertIn("you are no longer queued: pool_a is out of rotation", err)
+        self.assertIn("Tell the user that pool_a failed to boot", err)
+        self.assertEqual(json.loads(self.ok("status", "--json").stdout)["queue"], [])
+
+    def test_a_handed_over_stopped_emulator_says_to_boot_it(self):
+        from devicelease.claims import Claim
+        from devicelease.hook import handoff_notice
+        claim = Claim(device="pool_a", kind="emulator", owner="s", project="/p",
+                      created_at=None, heartbeat_at=None)
+        self.assertIn("devicelease claim pool_a --boot", handoff_notice(claim))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -362,6 +362,7 @@ def cmd_queue(lease: Lease, args) -> int:
     kind = PHYSICAL if args.physical else EMULATOR if args.emulator else None
     claim, entry, already = lease.enqueue(args.device, kind, args.min_api, args.wait, args.note)
     if claim:
+        claim = lease.boot_handed(claim)
         lease.take_handoff_notices()
         if args.json:
             _print_json({"status": "yours", "claim": claim.to_dict(), "alreadyHeld": already})
@@ -392,6 +393,7 @@ def cmd_queue(lease: Lease, args) -> int:
         print(f"Left the queue for {entry.label}.", file=sys.stderr)
         return 130
     if status == "yours":
+        claim = lease.boot_handed(claim)
         lease.take_handoff_notices()
         if args.json:
             _print_json({"status": "yours", "claim": claim.to_dict()})
