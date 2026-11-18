@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+#
+# Installs devicelease's icon and a hidden desktop entry, so desktop notifications show the
+# devicelease name and icon. GNOME takes a notification's app icon from the desktop entry that
+# the `desktop-entry` hint names.
+set -euo pipefail
+
+repo="$(cd "$(dirname "$0")/.." && pwd)"
+data="${XDG_DATA_HOME:-$HOME/.local/share}"
+icons="$data/icons/hicolor/scalable/apps"
+apps="$data/applications"
+
+mkdir -p "$icons" "$apps"
+install -m 644 "$repo/assets/devicelease.svg" "$icons/devicelease.svg"
+cat > "$apps/devicelease.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=devicelease
+Comment=Shared Android device claims for agent sessions
+Exec=devicelease list
+Icon=devicelease
+Terminal=true
+NoDisplay=true
+EOF
+
+gtk-update-icon-cache -q -t "$data/icons/hicolor" 2>/dev/null || true
+update-desktop-database -q "$apps" 2>/dev/null || true
+echo "Installed $icons/devicelease.svg and $apps/devicelease.desktop"
