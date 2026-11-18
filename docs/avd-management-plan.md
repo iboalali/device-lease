@@ -74,7 +74,7 @@ Hooks only see what Claude Code runs. A script that calls `avdmanager` itself, o
 
 - **State.** One marker file per AVD in `~/.local/state/devicelease/wipe/<avd>`, written when a claim on a pool emulator ends. It survives restarts, so a crash between stop and boot does not skip the wipe.
 - **Ending a claim.** Everywhere a claim ends (`_release`, `sweep`, `hand_off`'s stale replacement), a pool emulator owned by an agent gets: the marker, then `adb -s <serial> emu kill`. The kill does not wait. A `--owner me` claim ends without either.
-- **Booting.** `boot_emulator` gets a `wipe` flag. A pool emulator boots with `-no-snapshot`, plus `-wipe-data` while its marker exists. Before starting, it waits up to 60 seconds for the previous emulator process of that AVD to exit (the AVD's `multiinstance.lock`), because a kill from the last release may still be in progress. After `sys.boot_completed`, it runs `afterWipe` when the boot wiped, then removes the marker. Every boot path uses it: `claim --boot`, the `pre-device-open` hook, and the hand-off boot below.
+- **Booting.** `boot_emulator` gets a `wipe` flag. A pool emulator boots with `-no-snapshot`, plus `-wipe-data` while its marker exists. Before starting, it waits up to 60 seconds for the previous emulator process of that AVD to exit, because a kill from the last release may still be in progress. It checks the process, not the AVD's `multiinstance.lock` file, which stays on disk after the emulator exits. After `sys.boot_completed`, it runs `afterWipe` when the boot wiped, then removes the marker. Every boot path uses it: `claim --boot`, the `pre-device-open` hook, and the hand-off boot below.
 - **Shown to agents.** `devicelease list` shows `stopped, wipe pending` for a marked emulator, and `pool` / `home: <project>` in a new column.
 
 ## Restarting and wiping during a task
@@ -129,10 +129,11 @@ A boot that fails, a wipe that fails, or an `afterWipe` that exits non-zero is s
 
 ## Phases
 
-0. **Verify.**
-   - A `-wipe-data -no-snapshot` boot of an AVD that has Quick Boot snapshots leaves no old state behind, and whether it also deletes the old `snapshots/` folder.
-   - How long `adb emu kill` takes until the AVD's lock is free.
-   - Boot time of `BRC_api36_magisk` with wipe plus `afterWipe` (cold boot, install, reboot). It has to fit the `pre-device-open` hook's 300-second timeout.
+0. **Verify.** Done on 2026-11-18, on throwaway copies of `e2e_api36` and `BRC_api36_magisk`:
+   - `adb emu kill` on a Quick Boot emulator saves a snapshot on exit. For `e2e_api36` its `ram.bin` alone is 3.3 GB, more than the user data. This is the main reason pool emulators cold boot.
+   - A `-wipe-data -no-snapshot` boot removes the old state (a marker file and a setting were gone) and deletes the whole `snapshots/` folder. The copy shrank from 6.1 GB to 965 MB. It took 39 seconds.
+   - `adb emu kill` on a cold-booted emulator ends the process in 2 seconds and saves no snapshot.
+   - `BRC_api36_magisk`: the wiped cold boot took 84 seconds and `provision-magisk.sh` 22 seconds, 106 seconds in total, well inside the `pre-device-open` hook's 300 seconds.
 1. **Guard.** The `inventory` target, the denial and `"ask"` texts, the pool-boot denial, and the `pre-write` hook. Useful on its own, before any wipe exists.
 2. **Wipe.** `wipeAfterUse`, the marker, stopping on claim end, the wiping boot with `afterWipe`, `devicelease wipe`, the `-wipe-data` check on `claim --boot` arguments, and the failed marker with its messages.
 3. **Hand-off to stopped emulators.** `boot_pending` and the three waiter paths.
@@ -150,6 +151,6 @@ A boot that fails, a wipe that fails, or an `afterWipe` that exits non-zero is s
 
 ## Open risks
 
-- **Boot time in hooks.** A cold boot plus `afterWipe` with a reboot may get close to the `pre-device-open` hook's 300 seconds. If Phase 0 shows it does, that hook claims and starts the boot, and tells the agent to wait for it with `devicelease queue <id> --wait`.
+- **Boot time in hooks.** The slowest pool emulator measured, `BRC_api36_magisk`, needs 106 seconds for a wiped boot with `afterWipe`, against the `pre-device-open` hook's 300. A slower `afterWipe` added later could still hit the limit. If one does, that hook claims and starts the boot, and tells the agent to wait for it with `devicelease queue <id> --wait`.
 - **Booting outside devicelease.** Android Studio's Device Manager can still boot a pool emulator without the wipe. `list` shows `wipe pending` so it is visible, and the wipe happens on the next devicelease boot.
 - **Agents that release early.** Releasing means "done". An agent that releases and claims again in the same task gets a wiped emulator. The help text says to keep the claim for the whole task.
