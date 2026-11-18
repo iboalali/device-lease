@@ -68,6 +68,17 @@ def _implicit_hint(lease: Lease, target: Target, mine: list[Claim]) -> str:
     }.get(target.tool, f"Run it as `devicelease exec -- {_shorten(target.command, 60)}`.")
 
 
+def _dynamic_hint(lease: Lease, mine: list[Claim]) -> str:
+    if len(mine) != 1:
+        return GUIDE
+    try:
+        serial = lease.live_serial(mine[0])
+    except LeaseError as e:
+        return str(e)
+    return (f"Write the serial out (`adb -s {serial}`), set the variable earlier in the same "
+            f"command (`S={serial}; adb -s \"$S\" ...`), or use `$(devicelease serial)`.")
+
+
 def _judge(lease: Lease, target: Target) -> str | None:
     """Returns why the session may not run this device command, or None if it may."""
     command = f"`{_shorten(target.command)}`"
@@ -78,7 +89,7 @@ def _judge(lease: Lease, target: Target) -> str | None:
         except LeaseError as e:
             return f"{command}: {e}"
     mine = _valid_claims(lease)
-    if target.mode != IMPLICIT:
+    if target.self_serial:
         if len(mine) == 1:
             return None
         held = f"you hold {len(mine)} devices" if mine else "you hold no device"
@@ -86,6 +97,9 @@ def _judge(lease: Lease, target: Target) -> str | None:
     online = [d for d in lease.devices if d.online and (target.kind is None or d.kind == target.kind)]
     if len(online) == 1 and any(c.device == online[0].id for c in mine):
         return None
+    if target.mode != IMPLICIT:
+        return (f"{command} names its device through `{target.device}`, which devicelease cannot "
+                f"read, so it may use one you have not claimed. {_dynamic_hint(lease, mine)}")
     return (f"{command} does not name a device, so it may use one you have not claimed. "
             f"{_implicit_hint(lease, target, mine)}")
 

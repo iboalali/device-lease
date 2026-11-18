@@ -37,6 +37,8 @@ GRADLE_OPTIONS_WITH_VALUE = {
 WRAPPERS = {"sudo", "env", "time", "nohup", "nice", "timeout", "exec", "command", "stdbuf",
             "xargs", "watch", "unbuffer", "caffeinate", "ionice", "chrt", "taskset"}
 SHELLS = {"sh", "bash", "zsh", "dash"}
+KEYWORDS = {"if", "then", "else", "elif", "while", "until", "do", "!", "{"}
+VARIABLE = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))")
 ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 WRAPPER_OPTIONS_WITH_VALUE = {
     "sudo": {"-u", "-g", "-C", "-p", "-U", "-h", "-r", "-t", "-D"},
@@ -128,6 +130,9 @@ def _skip_wrappers(words: list[str], env: dict[str, str]) -> list[str]:
             env[key] = value
             words = words[1:]
             continue
+        if words[0] in KEYWORDS:
+            words = words[1:]
+            continue
         name = os.path.basename(words[0])
         if name not in WRAPPERS:
             return words
@@ -146,6 +151,24 @@ def _skip_wrappers(words: list[str], env: dict[str, str]) -> list[str]:
         if name == "timeout" and words:
             words = words[1:]
     return words
+
+
+def _expand(word: str, shell_env: dict[str, str]) -> str:
+    """Substitutes `$NAME` and `${NAME}` from variables set earlier in the line. A word with any
+    variable that cannot be resolved stays as it is."""
+    names = [a or b for a, b in VARIABLE.findall(word)]
+    if not names or any(n not in shell_env for n in names):
+        return word
+    return VARIABLE.sub(lambda m: shell_env[m.group(1) or m.group(2)], word)
+
+
+def _assign(shell_env: dict[str, str], key: str, value: str) -> None:
+    """Records a shell variable, or forgets it when its value is only known at run time."""
+    value = _expand(value, shell_env)
+    if "$" in value or "`" in value:
+        shell_env.pop(key, None)
+    else:
+        shell_env[key] = value
 
 
 def _device(tool: str, value: str | None, line: str, kind: str | None = None) -> Target:
@@ -262,19 +285,28 @@ def _command_targets(words: list[str], shell_env: dict[str, str], depth: int) ->
     words = _skip_wrappers(_drop_redirections(words), env)
     if not words:
         # A line of bare assignments sets shell variables for the commands after it.
-        shell_env.update(env)
+        for key, value in env.items():
+            if shell_env.get(key) != value:
+                _assign(shell_env, key, value)
         return []
+    # Bash expands arguments before a prefix assignment (`S=x adb -s $S`) takes effect, so only
+    # variables from earlier commands apply.
+    words = [words[0], *(_expand(w, shell_env) for w in words[1:])]
+    env = {k: _expand(v, shell_env) for k, v in env.items()}
     line = shlex.join(words)
     name = os.path.basename(words[0])
     if name == "export":
         for word in words[1:]:
             if ASSIGNMENT.match(word):
                 key, _, value = word.partition("=")
-                shell_env[key] = value
+                _assign(shell_env, key, value)
         return []
-    if name == "unset":
+    if name == "unset" or name == "read":
         for word in words[1:]:
             shell_env.pop(word, None)
+        return []
+    if name in ("for", "select") and len(words) > 1:
+        shell_env.pop(words[1], None)
         return []
     if name in SHELLS:
         found, script = _option_value(words, "-c", "-lc", "-ic")

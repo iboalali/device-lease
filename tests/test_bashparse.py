@@ -75,6 +75,26 @@ CASES = [
     ('adb -s "$(devicelease serial)" shell ls', [("adb", DYNAMIC, "$(devicelease serial)")]),
     ("adb -s $SERIAL shell ls", [("adb", DYNAMIC, "$SERIAL")]),
     ("adb -t 3 shell", [("adb", DYNAMIC, "transport id")]),
+    ("S=X adb -s $S shell", [("adb", DYNAMIC, "$S")]),
+    ("S=$(devicelease serial); adb -s $S shell", [("adb", DYNAMIC, "$S")]),
+    ("S=A; for S in B C; do adb -s $S shell; done", [("adb", DYNAMIC, "$S")]),
+    ("S=A; read S; adb -s $S shell", [("adb", DYNAMIC, "$S")]),
+    ("S=A; S=$OTHER; adb -s $S shell", [("adb", DYNAMIC, "$S")]),
+
+    # Variables set earlier in the line.
+    ("S=emulator-5558; adb -s $S shell", [("adb", EXPLICIT, "emulator-5558")]),
+    ('export S=X; adb -s "${S}" shell', [("adb", EXPLICIT, "X")]),
+    ("PORT=5554; adb -s emulator-$PORT shell", [("adb", EXPLICIT, "emulator-5554")]),
+    ("A=X; B=$A; adb -s $B shell", [("adb", EXPLICIT, "X")]),
+    ("S=X; ANDROID_SERIAL=$S adb shell", [("adb", EXPLICIT, "X")]),
+    ("S=X; android install --device=$S --apks=a.apk", [("android", EXPLICIT, "X")]),
+
+    # Shell keywords.
+    ("if true; then adb -s X shell; fi", [("adb", EXPLICIT, "X")]),
+    ("for i in 1 2; do adb -s X shell; done", [("adb", EXPLICIT, "X")]),
+    ("while adb -s X shell true; do :; done", [("adb", EXPLICIT, "X")]),
+    ("{ adb -s X shell; }", [("adb", EXPLICIT, "X")]),
+    ("! adb -s X shell", [("adb", EXPLICIT, "X")]),
 ]
 
 

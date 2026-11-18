@@ -21,8 +21,10 @@ USE A DEVICE
   3. Name the device in every command:
        adb -s <serial> ...    android ... --device=<serial>    scrcpy -s <serial>
        `devicelease serial` prints the serial. An emulator gets a new serial on every
-       boot, so ask for it instead of remembering it. A command that names no device
-       only runs while your device is the only one online.
+       boot, so ask for it instead of remembering it. A command that names no device,
+       or names it through a variable set outside the command (`adb -s $SERIAL`), only
+       runs while your device is the only one online. `S=<serial>; adb -s "$S"` in one
+       command works.
   4. devicelease exec -- ./gradlew connectedAndroidTest
        Runs Gradle device tasks (and anything else) with ANDROID_SERIAL set to your
        device. Without it, Gradle uses every connected device.

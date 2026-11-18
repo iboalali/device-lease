@@ -117,10 +117,32 @@ class HookTest(unittest.TestCase):
         self.assertIsNone(self.bash("adb shell ls"))
         self.assertIsNone(self.bash("adb -e shell ls"))
 
-    def test_dynamic_target_needs_exactly_one_claim(self):
-        self.assertIn("you hold no device", self.bash("adb -s $SERIAL shell"))
+    def test_self_serial_needs_exactly_one_claim(self):
+        self.assertIn("you hold no device", self.bash('adb -s "$(devicelease serial)" shell'))
         self.cli("claim", "uitest_api37")
+        self.assertIsNone(self.bash('adb -s "$(devicelease serial)" shell'))
+
+    def test_unreadable_variable_passes_only_when_own_device_is_the_only_one_online(self):
+        self.cli("claim", "uitest_api37")
+        reason = self.bash("adb -s $SERIAL shell")
+        self.assertIn("names its device through `$SERIAL`", reason)
+        self.assertIn('S=emulator-5554; adb -s "$S"', reason)
+        self.set_devices(DEVICES[1:])
         self.assertIsNone(self.bash("adb -s $SERIAL shell"))
+
+    def test_variable_set_in_the_same_command_is_checked(self):
+        self.cli("claim", "uitest_api37")
+        self.assertIsNone(self.bash("S=emulator-5554; adb -s $S shell ls"))
+        reason = self.bash("S=0A1B2C3D4E; adb -s $S install app.apk")
+        self.assertIn("0A1B2C3D4E", reason)
+
+    def test_commands_after_shell_keywords_are_checked(self):
+        self.cli("claim", "uitest_api37", session="session-b")
+        for command in ("if true; then adb -s emulator-5554 shell; fi",
+                        "for i in 1 2; do adb -s emulator-5554 shell; done",
+                        "{ adb -s emulator-5554 shell; }"):
+            with self.subTest(command=command):
+                self.assertIn("taken by session-b", self.bash(command))
 
     def test_booting_an_emulator_needs_a_claim(self):
         self.assertIn("you have not claimed Pixel_6a", self.bash("emulator -avd Pixel_6a"))
