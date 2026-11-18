@@ -476,7 +476,8 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--interval", type=float, default=2, metavar="SECONDS",
                        help="with --watch: seconds between redraws (default 2)")
 
-    add_watch(add("list", cmd_list, "list every known device and who holds it"))
+    add_watch(add("list", cmd_list, "list every known device and who holds it, with pool "
+                                    "emulators, pending wipes, failures and home projects"))
 
     p = add("claim", cmd_claim, "claim a device for this session")
     p.add_argument("device", nargs="?", help="device ID (AVD name or adb serial)")
@@ -487,7 +488,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--min-api", type=int, metavar="N", help="with --any: API level N or higher")
     p.add_argument("--boot", action="store_true",
                    help="start the emulator after claiming it, with the host GPU; arguments "
-                        "after -- go to the emulator and imply --boot")
+                        "after -- go to the emulator and imply --boot. A pool emulator "
+                        "always cold boots, and is wiped when another agent used it last")
     p.add_argument("--no-snapshot", action="store_true",
                    help="like --boot, but cold boot without loading or saving a snapshot")
     p.add_argument("--note", help="free text stored with the claim")

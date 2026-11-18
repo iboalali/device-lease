@@ -32,7 +32,8 @@ USE A DEVICE
        Frees the device when you are done.
 
   In T3 Code, device_open with a deviceId claims that device for the thread, and
-  device_close releases it. A stopped emulator is booted with the host GPU first.
+  device_close releases it. A stopped emulator is booted with the host GPU first,
+  and a pool emulator that waits for its wipe is wiped on that boot.
 
 WHEN THE DEVICE IS TAKEN
 
@@ -90,20 +91,30 @@ EMULATORS ON THIS MACHINE
 COMMANDS
 
   list [--json] [--watch [--interval SECONDS]]
-      Every device adb and the AVD folder know about: kind, API level, state and lease
-      (free, yours, taken by ..., not allowed here), and how many sessions wait for it.
+      Every device adb and the AVD folder know about: kind (with "pool" for pool
+      emulators), API level, state (with "wipe pending" while a pool emulator waits
+      for its wipe) and lease (free, yours, taken by ..., not allowed here, out of
+      rotation), its home project if it has one, and how many sessions wait for it.
       --watch redraws it every 2 seconds until Ctrl-C, for a terminal pane.
   claim <id> [--boot|--no-snapshot] [--note TEXT] [-- EMULATOR ARGS]
       Claims one device. Fails with the holder's name if the device is taken.
       --boot starts a stopped emulator with `-gpu host`. --no-snapshot cold boots it
       instead, without loading or saving the Quick Boot snapshot. Arguments after --
       go to the emulator and imply --boot. A `-gpu` there replaces `-gpu host`.
+      A pool emulator always cold boots; after another agent used it, the boot wipes
+      it and runs its afterWipe step. `-- -wipe-data` only works for pool emulators.
+      A failed (out of rotation) emulator is refused.
   claim --any [--emulator|--physical] [--min-api N] [--note TEXT]
-      Claims the first free, allowed, running device that matches.
+      Claims the first free, allowed, running device that matches, the home project's
+      own emulators first. It skips other projects' home emulators, pool emulators
+      waiting for their wipe, and failed ones.
   queue <id> | --any [--emulator|--physical] [--min-api N]  [--wait [--timeout MIN]]
       Claims the device now if it is free, otherwise joins the queue for it. With
       --wait it polls until the device is yours (exit 0) or the timeout passes
-      (exit 3, default 115 minutes). Ctrl-C leaves the queue.
+      (exit 3, default 115 minutes). Ctrl-C leaves the queue. A pool emulator you get
+      from the queue is booted (and wiped) before the command says it is yours, which
+      can take a few minutes. The home project of an emulator goes first in its queue.
+      If the emulator you wait for fails, you are told and leave the queue (exit 1).
   unqueue [<id> | --any | --all]
       Leaves the queue. Without an argument it leaves your only entry.
   release [<id> | --all]
