@@ -22,11 +22,20 @@ class Rules:
 
 
 @dataclass
+class DeviceRules:
+    home: str | None = None
+    """The project the emulator is meant for, as a resolved path."""
+    after_wipe: str | None = None
+    """A command run after each wiped boot, with ANDROID_SERIAL set, in `home` when there is one."""
+
+
+@dataclass
 class Policy:
     expiry_minutes: float = DEFAULT_EXPIRY_MINUTES
     deny: list[str] = field(default_factory=list)
     wipe_after_use: list[str] = field(default_factory=list)
     """The pool: emulators whose user data is wiped after each agent's claim."""
+    devices: dict[str, DeviceRules] = field(default_factory=dict)
     projects: dict[str, Rules] = field(default_factory=dict)
     defaults: Rules = field(default_factory=lambda: Rules(allow=["*"]))
     repo: Rules | None = None
@@ -53,6 +62,10 @@ class Policy:
     def in_pool(self, device_id: str, name: str | None = None) -> bool:
         names = [device_id] + ([name] if name else [])
         return any(fnmatchcase(n, p) for p in self.wipe_after_use for n in names)
+
+    def device_rules(self, device_id: str, name: str | None = None) -> DeviceRules:
+        return self.devices.get(device_id) or (self.devices.get(name) if name else None) \
+            or DeviceRules()
 
     def check(self, root: str, device_id: str, name: str | None = None,
               t3_project: str | None = None) -> str | None:
@@ -94,6 +107,24 @@ def _rules(value, where: str, default_allow) -> Rules:
     )
 
 
+def _devices(value, where: str) -> dict[str, DeviceRules]:
+    if not isinstance(value, dict):
+        raise PolicyError(f"{where} must be an object")
+    result = {}
+    for device_id, rules in value.items():
+        if not isinstance(rules, dict):
+            raise PolicyError(f"{where}.{device_id} must be an object")
+        home, after_wipe = rules.get("home"), rules.get("afterWipe")
+        for key, item in (("home", home), ("afterWipe", after_wipe)):
+            if item is not None and not isinstance(item, str):
+                raise PolicyError(f"{where}.{device_id}.{key} must be a string")
+        result[device_id] = DeviceRules(
+            home=os.path.realpath(os.path.expanduser(home)) if home else None,
+            after_wipe=after_wipe,
+        )
+    return result
+
+
 def _read(path: Path):
     try:
         with open(path) as f:
@@ -118,6 +149,7 @@ def load_policy(project: Project) -> Policy:
         policy.expiry_minutes = expiry
         policy.deny = _patterns(data.get("deny", []), f"{path}: deny")
         policy.wipe_after_use = _patterns(data.get("wipeAfterUse", []), f"{path}: wipeAfterUse")
+        policy.devices = _devices(data.get("devices", {}), f"{path}: devices")
         projects = data.get("projects", {})
         if not isinstance(projects, dict):
             raise PolicyError(f"{path}: projects must be an object")

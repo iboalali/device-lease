@@ -72,7 +72,16 @@ EMULATORS ON THIS MACHINE
 
   Pool emulators (the user's policy lists them) only boot through
   `devicelease claim <id> --boot`, never through `emulator -avd` or
-  `android emulator start`.
+  `android emulator start`. They always cold boot. When an agent's claim on one ends,
+  devicelease stops it, and the next boot wipes its user data and runs its afterWipe
+  step: `devicelease list` shows "wipe pending" until then. So keep your claim for the
+  whole task; a released pool emulator comes back empty. To reset it on purpose, run
+  `devicelease wipe`. Restarting it keeps the data: `adb -s <serial> reboot`, or
+  `adb -s <serial> emu kill` and then `devicelease claim <id> --boot`.
+
+  If a boot, a wipe or an afterWipe step fails, the message says so. Tell the user, with
+  the log it names, and don't retry. You may continue on another emulator if one can
+  do the work. The failed emulator is out of rotation until the user fixes it.
 
 COMMANDS
 
@@ -97,6 +106,10 @@ COMMANDS
       Frees your claim. Without an ID it frees your only claim.
   release --force <id> [--yes]
       Frees another session's claim, after a confirmation. Only when the user asks.
+  wipe [<id>] [-- EMULATOR ARGS]
+      Restarts a pool emulator you hold with its user data wiped, runs its afterWipe
+      step, and prints the new serial. You keep the claim. It can take minutes, so run
+      it with Bash run_in_background or a long timeout.
   status [--json] [--watch [--interval SECONDS]]
       Every claim, including stale ones, and every queue entry. --watch redraws it every
       2 seconds until Ctrl-C.

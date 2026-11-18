@@ -45,6 +45,7 @@ devicelease help                        # the full guide
 | `claim --any` | Claims the first free, allowed, running device, emulators before phones. `--emulator`, `--physical` and `--min-api N` narrow the choice. If nothing is free, it says how to get a device and lists the emulators you may boot. |
 | `queue <id>` | Waits for a taken device. If it is free, claims it right away. When the device frees up, it is claimed for the first waiter in line, and the waiter is told. `--any` with `--emulator`, `--physical` and `--min-api N` waits for the first matching device. See "Wait for a taken device". |
 | `unqueue [<id>]` | Leaves the queue. `--any` leaves the queue for any device, `--all` leaves every queue. |
+| `wipe [<id>]` | Restarts a pool emulator you hold with its user data wiped, runs its `afterWipe` step and prints the new serial. You keep the claim. Arguments after `--` go to the emulator. Only for pool emulators. |
 | `release [<id>]` | Frees your claim. Without an ID it frees your only claim. `--all` frees every claim you hold. `--force <id>` frees another session's claim after a confirmation (`--yes` skips it). |
 | `status [--json]` | Every claim, including stale ones, with owner, project and age, and every queue entry. `--watch` redraws it like `list --watch`. |
 | `whoami [--json]` | Who devicelease thinks you are, your project, the policy that applies and the devices you may use. |
@@ -100,7 +101,14 @@ Without a policy file every device is allowed everywhere. `~/.config/devicelease
     "~/Projects/ui-tests": { "allow": ["uitest_*"], "deny": ["uitest_pixel"] },
     "t3:6f1c2a7e-0b9d-4e15-9a3c-2d8e7f0b4c61": { "allow": ["uitest_*"] }
   },
-  "defaults": { "allow": ["*"] }
+  "defaults": { "allow": ["*"] },
+  "wipeAfterUse": ["pool_*", "root_api36_magisk"],
+  "devices": {
+    "root_api36_magisk": {
+      "home": "~/Projects/root-checker",
+      "afterWipe": "scripts/emulator/provision-magisk.sh"
+    }
+  }
 }
 ```
 
@@ -108,7 +116,9 @@ Without a policy file every device is allowed everywhere. `~/.config/devicelease
 - The global `deny` list wins. Then the project's `deny`, then the project's `allow` (or `defaults.allow` for a project not listed).
 - A project is the main repository root, so a git worktree follows the same entry as its repository. A path entry also covers the folders below it, and the longest matching path wins.
 - A `t3:<project id>` entry applies to every thread of that T3 Code project, in any worktree, and wins over path entries. `devicelease whoami` inside a T3 Code thread prints the key.
-- `wipeAfterUse` lists the pool: emulators that only boot through devicelease. In Bash, `emulator -avd` and `android emulator start` are refused for them, with a pointer to `devicelease claim <id> --boot`.
+- `wipeAfterUse` lists the pool. A pool emulator only boots through devicelease (in Bash, `emulator -avd` and `android emulator start` are refused for it, with a pointer to `devicelease claim <id> --boot`), and always cold boots, so no Quick Boot snapshot is saved. When an agent's claim on it ends (release, session end, settled thread, stale heartbeat, `device_close`), devicelease stops it and marks it "wipe pending". The next boot through devicelease runs with `-wipe-data`, then runs the emulator's `afterWipe` command. A claim by `--owner me` is never wiped. `devicelease claim <id> -- -wipe-data` and `devicelease wipe` are refused for emulators outside the pool.
+- `devices.<id>` sets per-emulator options: `home`, the project the emulator is meant for, and `afterWipe`, a command run after each wiped boot with `ANDROID_SERIAL` set, in `home` when there is one. Its output goes to the emulator's boot log in `~/.local/state/devicelease/logs/`.
+- A boot, wipe or `afterWipe` that fails marks the pool emulator failed. Its claim is released, the agent's message tells it to report the failure to you with the log, and a desktop notification shows the same (`scripts/install-desktop-entry` installs its icon). The queue and `claim --any` skip a failed emulator, and agents cannot claim it, until you boot it successfully with `devicelease claim <id> --boot --owner me`. `devicelease list` shows it as out of rotation, with the log kept as `<id>.failed.log`.
 - A repository can add a `.devicelease.json` at its root, with `allow` and `deny` in the same format. It can only narrow what the user policy allows, never widen it.
 
 ## Integrate

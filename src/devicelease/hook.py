@@ -9,7 +9,7 @@ import os
 import re
 import sys
 
-from devicelease import notify, paths
+from devicelease import notify, paths, wipe
 from devicelease.bashparse import EXPLICIT, IMPLICIT, INVENTORY, USER_REQUESTED, Target, \
     device_targets
 from devicelease.claims import Claim
@@ -206,7 +206,9 @@ def pre_device_open(data: dict) -> None:
     device = find(lease.devices, device_id)
     # T3 Code boots a stopped emulator with `-gpu auto`, which renders in software. Booting it
     # here with the host GPU first lets device_open attach to the running emulator instead.
-    boot = device is not None and device.kind == EMULATOR and device.state == STOPPED
+    # A pool emulator that is still stopping for its wipe is booted again here, wiped.
+    boot = device is not None and device.kind == EMULATOR and (
+        device.state == STOPPED or wipe.pending(device.id))
     try:
         claim, _ = lease.claim(device_id, t3_device=device_id, boot=boot,
                                emulator_args=HUB_EMULATOR_ARGS if boot else ())

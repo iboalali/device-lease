@@ -8,8 +8,8 @@ import time
 from contextlib import redirect_stdout
 from datetime import timedelta
 
-from devicelease import notify, paths
-from devicelease.claims import Claim
+from devicelease import notify, paths, wipe
+from devicelease.claims import Claim, parse_time
 from devicelease.devices import EMULATOR, MISSING, PHYSICAL, Device, DiscoveryError
 from devicelease.guide import GUIDE
 from devicelease.hook import HANDLERS, handoff_notice, run as run_hook
@@ -81,12 +81,15 @@ def _list(lease: Lease, args) -> int:
         claim = claims.get(device.id)
         reason = lease.not_allowed(device)
         waiting = [e for e in entries if e.matches(device)]
+        failure = wipe.failed(device.id) if device.kind == EMULATOR else None
         if claim and lease.is_mine(claim):
             status, text = "yours", f"yours (since {age(claim.created_at)})"
         elif claim:
             status, text = "taken", f"taken by {describe_holder(claim)}"
         elif reason:
             status, text = "not-allowed", f"not allowed here: {reason}"
+        elif failure:
+            status, text = "failed", _failure_text(failure)
         else:
             status, text = "free", "free"
         if claim and waiting:
@@ -96,10 +99,18 @@ def _list(lease: Lease, args) -> int:
                 text += f", you are {ordinal(place)}"
         rows_data.append((device, claim, status, reason, text, len(waiting)))
 
+    def pool(device):
+        return device.kind == EMULATOR and lease.policy.in_pool(device.id, device.name)
+
+    def pending(device):
+        return device.kind == EMULATOR and wipe.pending(device.id)
+
     if args.json:
         _print_json([
             {**device.to_dict(), "lease": status, "reason": reason,
-             "claim": claim.to_dict() if claim else None, "waiting": waiting}
+             "claim": claim.to_dict() if claim else None, "waiting": waiting,
+             "pool": pool(device), "wipePending": pending(device),
+             "failed": wipe.failed(device.id) if device.kind == EMULATOR else None}
             for device, claim, status, reason, _, waiting in rows_data
         ])
         return 0
@@ -109,9 +120,20 @@ def _list(lease: Lease, args) -> int:
         return 0
     rows = [["DEVICE", "KIND", "API", "STATE", "NAME", "LEASE"]]
     for device, _, _, _, text, _ in rows_data:
-        rows.append([device.id, device.kind, str(device.api or "-"), device.state, device.name, text])
+        kind = f"{device.kind}, pool" if pool(device) else device.kind
+        state = f"{device.state}, wipe pending" if pending(device) else device.state
+        rows.append([device.id, kind, str(device.api or "-"), state, device.name, text])
     _table(rows)
     return 0
+
+
+def _failure_text(record: dict) -> str:
+    try:
+        since = age(parse_time(record["at"]))
+    except (KeyError, ValueError):
+        since = "?"
+    return (f"out of rotation: failed to {record.get('what', 'boot')} ({since} ago), "
+            f"see {paths.display_path(record.get('log', '?'))}")
 
 
 def _print_claim(lease: Lease, claim: Claim, verb: str) -> None:
@@ -149,6 +171,18 @@ def cmd_claim(lease: Lease, args) -> int:
         _print_json({**claim.to_dict(), "alreadyHeld": already})
     else:
         _print_claim(lease, claim, "Already holding" if already else "Claimed")
+    return 0
+
+
+def cmd_wipe(lease: Lease, args) -> int:
+    if any(arg == "-avd" or arg.startswith("@") for arg in args.emulator_args):
+        raise LeaseError("the emulator boots the claimed AVD; leave -avd and @name out of the "
+                         "arguments after --")
+    claim = lease.wipe(args.device, args.emulator_args)
+    if args.json:
+        _print_json(claim.to_dict())
+    else:
+        _print_claim(lease, claim, "Wiped and booted")
     return 0
 
 
@@ -452,6 +486,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="like --boot, but cold boot without loading or saving a snapshot")
     p.add_argument("--note", help="free text stored with the claim")
 
+    p = add("wipe", cmd_wipe, "restart a pool emulator you hold with its user data wiped, "
+                              "then run its afterWipe step; arguments after -- go to the emulator")
+    p.add_argument("device", nargs="?", help="the pool emulator; optional when you hold one device")
+
     p = add("release", cmd_release, "release this session's claims")
     p.add_argument("device", nargs="?")
     p.add_argument("--all", action="store_true", help="release every claim of this owner")
@@ -525,7 +563,7 @@ def main(argv: list[str] | None = None) -> int:
         if not command:
             parser.error("exec needs a command after --")
         args.cmd = command
-    elif args.command == "claim":
+    elif args.command in ("claim", "wipe"):
         args.emulator_args = command
     elif command:
         parser.error("unexpected arguments after --")

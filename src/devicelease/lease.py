@@ -1,8 +1,9 @@
 import time
+from dataclasses import replace
 from datetime import timedelta
 
-from devicelease import cleanup, notify, paths, t3
-from devicelease.claims import Claim, Store, now, stale_reason
+from devicelease import cleanup, desktop, notify, paths, t3, wipe
+from devicelease.claims import Claim, Store, now, parse_time, stale_reason
 from devicelease.devices import (
     EMULATOR, PHYSICAL, STOPPED, Device, DiscoveryError, boot_emulator, discover, find,
 )
@@ -110,6 +111,66 @@ class Lease:
                     paths.state_dir() / "logs" / "agent-device.log",
                 )
 
+    def _ended(self, claims: list[Claim]) -> None:
+        """Runs what follows the end of claims: T3 Code's agent-device sessions close, and pool
+        emulators an agent held are stopped and marked for a wipe."""
+        self._end_t3_sessions(claims)
+        for claim in claims:
+            if claim.kind != EMULATOR or claim.human or not self.in_pool(claim.device):
+                continue
+            wipe.mark_pending(claim.device, claim.owner, claim.project)
+            device = self._find(claim.device)
+            if device is not None and device.online:
+                wipe.stop(device.serial)
+                self._devices = None
+
+    def _find(self, device_id: str) -> Device | None:
+        try:
+            return find(self.devices, device_id)
+        except DiscoveryError:
+            return None
+
+    def in_pool(self, device_id: str) -> bool:
+        device = self._find(device_id)
+        return self.policy.in_pool(device_id, device.name if device else None)
+
+    @staticmethod
+    def in_rotation(device: Device) -> bool:
+        """Whether the queue and `claim --any` may hand out the device: not stopping for a wipe,
+        and not failed."""
+        return device.kind != EMULATOR or not (wipe.pending(device.id) or wipe.failed(device.id))
+
+    def failure_message(self, device_id: str, record: dict, detail: str | None = None) -> str:
+        what, log = record.get("what", "boot"), paths.display_path(record.get("log", "?"))
+        message = (f"{device_id} failed to {what}" + (f": {detail}" if detail else "") + ". "
+                   f"Tell the user that {device_id} failed to {what}, with this log: {log}. "
+                   f"Don't retry it. If another emulator can do the work, you may continue on "
+                   f"one (`devicelease claim --any`, or `devicelease queue <other id> --wait`), "
+                   f"and still tell the user about the failure.")
+        home = self.policy.device_rules(device_id).home
+        if home:
+            message += (f" {device_id} is the emulator for {paths.display_path(home)}, so an "
+                        f"emulator without its setup is no substitute for work that needs it.")
+        return message
+
+    def out_of_rotation_message(self, device_id: str, record: dict) -> str:
+        try:
+            since = age(parse_time(record["at"]))
+        except (KeyError, ValueError):
+            since = "?"
+        return (f"{device_id} is out of rotation since {since} ago. The user has to fix it, then "
+                f"boot it once with `devicelease claim {device_id} --boot --owner me`. "
+                + self.failure_message(device_id, record))
+
+    def _boot_failed(self, claim: Claim, what: str, detail: str) -> None:
+        """Marks a pool emulator failed, releases it, tells the user and raises."""
+        record = wipe.mark_failed(claim.device, what, self.owner.id, self.project.root)
+        self._release([claim])
+        desktop.notify(f"{claim.device} failed to {what}",
+                       f"{short_owner(self.owner.id)} in {paths.display_path(self.project.root)}. "
+                       f"Log: {paths.display_path(record['log'])}")
+        raise LeaseError(self.failure_message(claim.device, record, detail))
+
     def is_mine(self, claim: Claim | Entry) -> bool:
         return claim.owner in self.owner.ids
 
@@ -148,7 +209,7 @@ class Lease:
                         and not claim.seen_online:
                     claim.seen_online = True
                     self.store.write(claim)
-        self._end_t3_sessions([claim for claim, _ in removed])
+        self._ended([claim for claim, _ in removed])
         self.hand_off()
         if cleanup.due():
             self.clean()
@@ -178,7 +239,7 @@ class Lease:
         if not any(self.queue.root.glob("*.json")):
             return []
         try:
-            devices = sorted((d for d in self.devices if d.online),
+            devices = sorted((d for d in self.devices if d.online and self.in_rotation(d)),
                              key=lambda d: (d.kind != EMULATOR, d.id))
         except DiscoveryError:
             return []
@@ -192,6 +253,8 @@ class Lease:
                 if claim and stale_reason(claim, self.expiry, online):
                     self.store.delete(device.id)
                     replaced.append(claim)
+                    if self._wiped_on_end(claim, device):
+                        continue
                     claim = None
                 if claim is None:
                     free.append(device)
@@ -215,10 +278,15 @@ class Lease:
                     self.queue.delete(entry.id)
                     free.remove(device)
                     given.append(claim)
-        self._end_t3_sessions(replaced)
+        self._ended(replaced)
         if any(c.notify_session for c in given):
             notify.spawn()
         return given
+
+    def _wiped_on_end(self, claim: Claim, device: Device) -> bool:
+        """Whether ending this claim stops the device for a wipe, so it cannot be handed out."""
+        return (device.kind == EMULATOR and not claim.human
+                and self.policy.in_pool(device.id, device.name))
 
     def _new_claim(self, device: Device, note: str | None) -> Claim:
         at = now()
@@ -238,8 +306,13 @@ class Lease:
 
     def claim(self, target: str, note: str | None = None, boot: bool = False,
               t3_device: str | None = None, snapshot: bool = True,
-              emulator_args: list[str] = ()) -> tuple[Claim, bool]:
-        """Claims a device. Returns the claim and whether this owner already held it."""
+              emulator_args: list[str] = (), wipe_data: bool = False) -> tuple[Claim, bool]:
+        """Claims a device. Returns the claim and whether this owner already held it.
+
+        A pool emulator always cold boots, and a boot after an agent's claim ended wipes its
+        user data and runs its afterWipe step. `wipe_data` (or `-wipe-data` among
+        `emulator_args`) restarts a pool emulator with its data wiped.
+        """
         device = find(self.devices, target)
         if device is None:
             raise LeaseError(f"unknown device {target}; run `devicelease list`")
@@ -248,6 +321,18 @@ class Lease:
             raise LeaseError(f"{device.id} is not allowed here: {reason}")
         if boot and device.kind != EMULATOR:
             raise LeaseError(f"--boot only applies to emulators; {device.id} is a physical device")
+        pool = device.kind == EMULATOR and self.policy.in_pool(device.id, device.name)
+        if "-wipe-data" in emulator_args:
+            if not pool:
+                raise LeaseError(f"{device.id} is not a pool emulator, so its data is the user's "
+                                 f"own; -wipe-data only applies to pool emulators")
+            emulator_args = [a for a in emulator_args if a != "-wipe-data"]
+            wipe_data = True
+        if wipe_data and not pool:
+            raise LeaseError(f"{device.id} is not a pool emulator; only pool emulators are wiped")
+        failure = wipe.failed(device.id) if device.kind == EMULATOR else None
+        if failure and not self.owner.human:
+            raise LeaseError(self.out_of_rotation_message(device.id, failure))
 
         self.hand_off()
         online = self.online_ids()
@@ -270,16 +355,46 @@ class Lease:
                 if not self.store.create(claim):
                     raise TakenError(f"{device.id} was just claimed by another session")
         if replaced:
-            self._end_t3_sessions([replaced])
+            self._ended([replaced])
+
+        if pool and device.online and (wipe_data or wipe.pending(device.id)):
+            # Stopping for a wipe: after the last agent's claim, or because this one asked.
+            wipe.stop(device.serial)
+            if not wipe.wait_stopped(device.id):
+                raise LeaseError(f"emulator {device.id} did not stop within "
+                                 f"{wipe.STOP_TIMEOUT}s; try again shortly")
+            device, self._devices = replace(device, state=STOPPED, serial=None), None
+        if wipe_data:
+            wipe.mark_pending(device.id, self.owner.id, self.project.root)
+            boot = True
 
         if boot and device.state == STOPPED:
+            wiping = pool and wipe.pending(device.id)
+            if pool and not wipe.wait_stopped(device.id):
+                raise LeaseError(f"the last emulator process of {device.id} did not exit within "
+                                 f"{wipe.STOP_TIMEOUT}s; try again shortly")
             try:
-                serial = boot_emulator(device.id, paths.state_dir() / "logs" / f"{device.id}.log",
-                                       snapshot=snapshot, extra_args=emulator_args)
-            except DiscoveryError:
+                serial = boot_emulator(device.id, wipe.log_path(device.id),
+                                       snapshot=snapshot and not pool,
+                                       extra_args=[*emulator_args,
+                                                   *(["-wipe-data"] if wiping else [])])
+            except DiscoveryError as e:
+                if pool:
+                    self._boot_failed(claim, "wipe and boot" if wiping else "boot", str(e))
                 if not already:
                     self._release([claim])
                 raise
+            if wiping:
+                rules = self.policy.device_rules(device.id, device.name)
+                if rules.after_wipe:
+                    code = wipe.run_after_wipe(rules.after_wipe, rules.home, serial, device.id)
+                    if code != 0:
+                        wipe.stop(serial)
+                        self._boot_failed(claim, "run its afterWipe step",
+                                          f"`{rules.after_wipe}` exited with {code}")
+                wipe.clear_pending(device.id)
+            if pool and self.owner.human:
+                wipe.clear_failed(device.id)
             self._devices = None
             with self.store.lock():
                 current = self.store.read(device.id)
@@ -298,7 +413,7 @@ class Lease:
                     and not self.not_allowed(device))
 
         self.hand_off()
-        candidates = [d for d in self.devices if d.online and matches(d)]
+        candidates = [d for d in self.devices if d.online and matches(d) and self.in_rotation(d)]
         candidates.sort(key=lambda d: (d.kind != EMULATOR, d.id))
         online = self.online_ids()
         replaced, claim = [], None
@@ -310,17 +425,20 @@ class Lease:
                         continue
                     self.store.delete(device.id)
                     replaced.append(existing)
+                    if self._wiped_on_end(existing, device):
+                        continue
                 new = self._new_claim(device, note)
                 if self.store.create(new):
                     claim = new
                     break
-        self._end_t3_sessions(replaced)
+        self._ended(replaced)
         if claim:
             return claim
 
         bootable = [
             d.id for d in self.devices
             if d.state == STOPPED and matches(d) and self.store.read(d.id) is None
+            and not wipe.failed(d.id)
         ]
         message = "no free device matches. "
         if kind == PHYSICAL:
@@ -361,7 +479,7 @@ class Lease:
                 if current and current.owner == claim.owner:
                     self.store.delete(claim.device)
                     released.append(current)
-        self._end_t3_sessions(released)
+        self._ended(released)
         if released:
             self.hand_off()
         return released
@@ -383,6 +501,15 @@ class Lease:
                                  f"use --force {other.device} to take it away")
             raise LeaseError(f"you do not hold {target}")
         return self._release([claim])
+
+    def wipe(self, target: str | None = None, emulator_args: list[str] = ()) -> Claim:
+        """Restarts a pool emulator this owner holds with its user data wiped."""
+        claim = self.single_claim(target)
+        if claim.kind != EMULATOR or not self.in_pool(claim.device):
+            raise LeaseError(f"{claim.device} is not a pool emulator; only pool emulators are "
+                             f"wiped (wipeAfterUse in the policy)")
+        return self.claim(claim.device, boot=True, emulator_args=emulator_args,
+                          wipe_data=True)[0]
 
     def find_any_claim(self, target: str) -> Claim | None:
         return self._resolve_claim(target, self.store.all())

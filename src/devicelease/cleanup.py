@@ -58,8 +58,11 @@ def run(running_avds: set[str] | None) -> list[tuple[str, str]]:
     done = []
     state = paths.state_dir()
     logs = state / "logs"
+    failed = {p.name for p in (state / "failed").glob("*")}
     for path in sorted(logs.glob("*.log")):
         try:
+            if path.name.endswith(".failed.log") and path.name[:-len(".failed.log")] in failed:
+                continue
             if path.name in APPEND_LOGS:
                 if path.stat().st_size > LOG_LIMIT:
                     rotate(path)
