@@ -1,3 +1,4 @@
+import os
 import time
 from dataclasses import replace
 from datetime import timedelta
@@ -260,14 +261,34 @@ class Lease:
                     claim = None
                 if claim is None:
                     free.append(device)
-            for entry in self.queue.all():
+            entries = self.queue.all()
+            live = [e for e in entries if not ended_reason(e)]
+            # A home project's waiter goes first for its emulator, ahead of older waiters
+            # from other projects.
+            homes = {d.id: self.home(d) for d in free}
+            home_waiting = {
+                d.id for d in free if homes[d.id] and any(
+                    self.at_home(e.project, homes[d.id]) and e.matches(d) for e in live)
+            }
+            for entry in entries:
                 if ended_reason(entry):
                     self.queue.delete(entry.id)
                     continue
                 if entry.target and wipe.failed(entry.target):
                     continue
-                device = next((d for d in free if entry.matches(d)
-                               and self._entry_allows(entry, d, policies)), None)
+
+                def fits(d: Device, entry=entry) -> bool:
+                    if not entry.matches(d) or not self._entry_allows(entry, d, policies):
+                        return False
+                    if self.at_home(entry.project, homes[d.id]):
+                        return True
+                    if entry.target is None and homes[d.id]:
+                        return False
+                    return d.id not in home_waiting
+
+                device = next((d for d in sorted(
+                    free, key=lambda d: not self.at_home(entry.project, homes[d.id]))
+                    if fits(d)), None)
                 if device is None:
                     continue
                 at = now()
@@ -286,6 +307,20 @@ class Lease:
         if any(c.notify_session for c in given):
             notify.spawn()
         return given
+
+    def home(self, device: Device) -> str | None:
+        """The project an emulator is meant for, from the policy's devices.<id>.home."""
+        return self.policy.device_rules(device.id, device.name).home
+
+    @staticmethod
+    def at_home(root: str, home: str | None) -> bool:
+        return home is not None and (root == home or root.startswith(home + os.sep))
+
+    def _for_any(self, device: Device, root: str) -> bool:
+        """Whether `--any` from this project may get the device: an emulator with a home only
+        goes to its home project that way. Other projects can still name it."""
+        home = self.home(device)
+        return home is None or self.at_home(root, home)
 
     def _handable(self, device: Device) -> bool:
         """Whether the queue may hand out the device: a running one, or a stopped pool emulator,
@@ -437,11 +472,12 @@ class Lease:
         def matches(device: Device) -> bool:
             return ((kind is None or device.kind == kind)
                     and (min_api is None or (device.api or 0) >= min_api)
-                    and not self.not_allowed(device))
+                    and not self.not_allowed(device)
+                    and self._for_any(device, self.project.root))
 
         self.hand_off()
         candidates = [d for d in self.devices if d.online and matches(d) and self.in_rotation(d)]
-        candidates.sort(key=lambda d: (d.kind != EMULATOR, d.id))
+        candidates.sort(key=lambda d: (self.home(d) is None, d.kind != EMULATOR, d.id))
         online = self.online_ids()
         replaced, claim = [], None
         with self.store.lock():

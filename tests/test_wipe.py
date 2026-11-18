@@ -69,17 +69,18 @@ class WipeTest(unittest.TestCase):
             "devices": {"pool_a": {"home": str(self.workdir), "afterWipe": after_wipe}},
         }))
 
-    def cli(self, *args, owner="session-a", booting=None):
+    def cli(self, *args, owner="session-a", booting=None, cwd=None):
         booting = booting or next((a for a in args if a.startswith(("pool_", "own_", "stopped_"))),
                                   None)
         if booting:
             (self.root / "booting").write_text(booting)
         env = dict(self.env, DEVICELEASE_OWNER=owner)
-        return subprocess.run([sys.executable, "-m", "devicelease", *args], cwd=self.workdir,
-                              env=env, capture_output=True, text=True, timeout=60)
+        return subprocess.run([sys.executable, "-m", "devicelease", *args],
+                              cwd=cwd or self.workdir, env=env, capture_output=True, text=True,
+                              timeout=60)
 
-    def ok(self, *args, owner="session-a", booting=None):
-        result = self.cli(*args, owner=owner, booting=booting)
+    def ok(self, *args, owner="session-a", booting=None, cwd=None):
+        result = self.cli(*args, owner=owner, booting=booting, cwd=cwd)
         self.assertEqual(result.returncode, 0, result.stderr)
         return result
 
@@ -223,15 +224,16 @@ class WipeTest(unittest.TestCase):
         self.ok("gc")
         self.assertTrue(kept.exists())
 
-    def wait_in_background(self, *args, owner):
+    def wait_in_background(self, *args, owner, cwd=None):
         env = dict(self.env, DEVICELEASE_OWNER=owner, DEVICELEASE_POLL_SECONDS="0.2")
-        return subprocess.Popen([sys.executable, "-m", "devicelease", *args], cwd=self.workdir,
+        return subprocess.Popen([sys.executable, "-m", "devicelease", *args],
+                                cwd=cwd or self.workdir,
                                 env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 text=True)
 
-    def wait_for_entry(self):
+    def wait_for_entry(self, count=1):
         for _ in range(100):
-            if json.loads(self.ok("status", "--json").stdout)["queue"]:
+            if len(json.loads(self.ok("status", "--json").stdout)["queue"]) >= count:
                 return
             subprocess.run(["sleep", "0.1"])
         self.fail("the waiter never queued")
@@ -273,6 +275,48 @@ class WipeTest(unittest.TestCase):
         claim = Claim(device="pool_a", kind="emulator", owner="s", project="/p",
                       created_at=None, heartbeat_at=None)
         self.assertIn("devicelease claim pool_a --boot", handoff_notice(claim))
+
+    def home_setup(self):
+        """pool_b's home is the work folder; `other` is another project."""
+        self.policy_file.write_text(json.dumps({
+            "wipeAfterUse": ["pool_*"],
+            "devices": {"pool_b": {"home": str(self.workdir)}},
+        }))
+        other = self.root / "other"
+        other.mkdir()
+        return other
+
+    def test_any_skips_another_projects_home_emulator(self):
+        other = self.home_setup()
+        self.ok("claim", "own_avd", owner="session-x")
+        result = self.cli("claim", "--any", "--emulator", cwd=other)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("no free device", result.stderr)
+        self.ok("claim", "pool_b", cwd=other)
+
+    def test_any_prefers_the_home_projects_emulator(self):
+        self.home_setup()
+        claim = json.loads(self.ok("claim", "--any", "--emulator", "--json").stdout)
+        self.assertEqual(claim["device"], "pool_b")
+        listed = {d["id"]: d for d in json.loads(self.ok("list", "--json").stdout)}
+        self.assertEqual(listed["pool_b"]["home"], str(self.workdir.resolve()))
+        self.assertIn("home: ", self.ok("list").stdout)
+
+    def test_the_home_project_goes_first_in_the_queue(self):
+        other = self.home_setup()
+        self.ok("claim", "pool_b", owner="session-a", cwd=other)
+        (self.root / "booting").write_text("pool_b")
+        first = self.wait_in_background("queue", "pool_b", "--wait", owner="session-b",
+                                        cwd=other)
+        self.wait_for_entry(1)
+        second = self.wait_in_background("queue", "pool_b", "--wait", owner="session-c")
+        self.wait_for_entry(2)
+        self.ok("release", "pool_b", owner="session-a", cwd=other)
+        out, err = second.communicate(timeout=60)
+        self.assertEqual(second.returncode, 0, err)
+        self.assertIn("pool_b is free and now yours", out)
+        first.terminate()
+        first.communicate(timeout=30)
 
 
 if __name__ == "__main__":

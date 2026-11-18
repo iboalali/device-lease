@@ -79,6 +79,10 @@ EMULATORS ON THIS MACHINE
   `devicelease wipe`. Restarting it keeps the data: `adb -s <serial> reboot`, or
   `adb -s <serial> emu kill` and then `devicelease claim <id> --boot`.
 
+  An emulator can belong to a home project (`devicelease list` shows "home: ..."). Other
+  projects only get it by name, never through --any, and the home project goes first
+  in its queue. If you need what makes it special (a rooted image, say), name it.
+
   If a boot, a wipe or an afterWipe step fails, the message says so. Tell the user, with
   the log it names, and don't retry. You may continue on another emulator if one can
   do the work. The failed emulator is out of rotation until the user fixes it.

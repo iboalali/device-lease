@@ -92,6 +92,9 @@ def _list(lease: Lease, args) -> int:
             status, text = "failed", _failure_text(failure)
         else:
             status, text = "free", "free"
+        home = lease.home(device) if device.kind == EMULATOR else None
+        if home:
+            text += f", home: {paths.display_path(home)}"
         if claim and waiting:
             text += f", {len(waiting)} waiting"
             place = next((i for i, e in enumerate(waiting, 1) if lease.is_mine(e)), None)
@@ -110,6 +113,7 @@ def _list(lease: Lease, args) -> int:
             {**device.to_dict(), "lease": status, "reason": reason,
              "claim": claim.to_dict() if claim else None, "waiting": waiting,
              "pool": pool(device), "wipePending": pending(device),
+             "home": lease.home(device) if device.kind == EMULATOR else None,
              "failed": wipe.failed(device.id) if device.kind == EMULATOR else None}
             for device, claim, status, reason, _, waiting in rows_data
         ])
