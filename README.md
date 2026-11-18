@@ -12,6 +12,7 @@ Linux only, Android only (physical devices and emulators), Python 3.11 or newer 
 git clone https://github.com/iboalali/device-lease.git
 cd device-lease
 ln -s "$PWD/bin/devicelease" ~/.local/bin/devicelease
+scripts/install-desktop-entry   # icon and name for desktop notifications
 devicelease list
 ```
 
@@ -170,6 +171,7 @@ Devices and emulators on this machine are shared between agent sessions. `device
 - Name the device in every command (`adb -s <serial>`, `--device=<serial>`).
 - Never use a device another session holds. Pick a free one or queue for it, as `devicelease help` describes.
 - Release the device when done.
+- Never create, delete or change an emulator or a system image. Use an existing emulator, and queue for a busy one.
 ```
 
 Codex and opencode only get these instructions. Nothing blocks them, because the hooks exist in Claude Code only.
@@ -192,7 +194,10 @@ devicelease release --all
 | `~/.local/state/devicelease/claims/` | One JSON file per claimed device (`DEVICELEASE_STATE_DIR` moves it). |
 | `~/.local/state/devicelease/queue/` | One JSON file per queue entry. |
 | `~/.local/state/devicelease/sessions/` | Each Claude Code session's permission mode, recorded by the hooks. |
-| `~/.local/state/devicelease/logs/` | Emulator boot logs, `agent-device close` calls, queue messages (`notify.log`) and the watcher's output. |
+| `~/.local/state/devicelease/logs/` | Emulator boot logs with `afterWipe` output, `<id>.failed.log` copies of failed boots, `agent-device close` calls, queue messages and desktop notifications (`notify.log`) and the watcher's output. |
+| `~/.local/state/devicelease/wipe/` | One file per pool emulator marked "wipe pending". |
+| `~/.local/state/devicelease/failed/` | One file per pool emulator out of rotation: what failed, when, for whom, and the log. |
+| `~/.config/devicelease/policy.json` | The policy (`DEVICELEASE_POLICY` moves it). |
 
 The folder cleans itself. `gc` does it, and so does any sweep, at most once an hour:
 
@@ -200,11 +205,12 @@ The folder cleans itself. `gc` does it, and so does any sweep, at most once an h
 - A running emulator's boot log is emptied once it passes 50 MiB. The boot log of an emulator not used for 7 days is deleted.
 - Temp files left by a process that died mid-write, and claim or queue files that cannot be read, are deleted after an hour.
 - A session's permission-mode record is deleted when the session has not been seen for 7 days.
-| `~/.config/devicelease/policy.json` | The policy (`DEVICELEASE_POLICY` moves it). |
+- A failed emulator's `<id>.failed.log` stays as long as the emulator is out of rotation.
 
 ## Limits
 
 - Claims are advisory between cooperating tools. Android Studio, or any process that skips the hooks, can still use any device.
+- The guard on emulators and system images only sees what Claude Code runs. A script that calls `avdmanager` itself, or an agent outside Claude Code, gets past it. Android Studio can still boot a pool emulator without its wipe; `devicelease list` then still shows "wipe pending", and the next devicelease boot wipes it.
 - A claim is created atomically, so two sessions can never both win a device. Expiry is the safety net for sessions that crash.
 
 ## Development
@@ -213,4 +219,4 @@ The folder cleans itself. `gc` does it, and so does any sweep, at most once an h
 PYTHONPATH=src:tests python3 -m unittest discover -s tests
 ```
 
-[docs/queue-plan.md](docs/queue-plan.md) holds the queue's design.
+[docs/queue-plan.md](docs/queue-plan.md) holds the queue's design, and [docs/avd-management-plan.md](docs/avd-management-plan.md) the design of the emulator guard, the pool wipe and home projects.

@@ -1,5 +1,16 @@
 # devicelease: managing the emulators themselves
 
+## Status
+
+Built on 2026-11-18, in five commits: the guard (Phase 1), the wipe (Phase 2), the hand-off to stopped emulators (Phase 3), home projects (Phase 4) and the docs (Phase 5). Where the build differs from the first version of this plan, the sections below describe the build:
+
+- Only pool emulators are marked failed. A failed boot of any other AVD behaves as before, so the "boot it with `-- -gpu auto`" hint still applies to the user's own AVDs.
+- A waiter queued by name for a failed emulator is told once, and its entry ends, rather than staying queued: a background `--wait` can only tell by exiting.
+- A hand-off has no `boot_pending` flag. The waiter's side checks whether the emulator runs, and boots it when it does not.
+- `queue --any` can receive a stopped pool emulator, booted for it. Running devices come first.
+
+Not verified on a real emulator: the code paths run in tests against a fake `emulator`, `adb` and `notify-send`. Phase 0 verified the emulator behavior they rely on.
+
 ## Goal
 
 The user decides which emulators exist on the machine. Agents use them, but do not create, delete or change them. The user keeps a fixed pool: one emulator per chosen API level, a few of the latest, and special-purpose ones such as a rooted image for one app. A busy emulator means waiting in the queue, never making a new one. Every pool emulator gets its user data wiped after each agent is done with it, so the next agent starts clean and the AVD folder does not keep growing. An emulator can belong to a home project: other projects can still use it, but only by name, and the home project goes first in its queue.
@@ -98,7 +109,7 @@ A boot that fails, a wipe that fails, or an `afterWipe` that exits non-zero is s
 - **The message tells the agent to report it.** Every such error, from `claim --boot`, `wipe`, `queue --wait`, the watcher's message and the `pre-device-open` hook denial, ends with: `Tell the user that <id> failed to <boot | wipe | run its afterWipe step>, with this log: <path>. Don't retry it. If another emulator can do the work, you may continue on one (devicelease claim --any, or devicelease queue <id> --wait), and still tell the user about the failure.` The failed emulator is already out of rotation (below), so `claim --any` does not pick it again. The log path points to `~/.local/state/devicelease/logs/<id>.log`, which holds the emulator's and `afterWipe`'s output.
 - **Home devices.** When the failed emulator has a home, the message also names it (`<id> is the emulator for ~/Projects/...`), so an agent that needs, for example, the rooted image knows a stock emulator is no substitute.
 - **The emulator is marked failed.** A marker in `~/.local/state/devicelease/failed/<id>` records what failed, when, for whom, and the log path. The emulator stays stopped, and its claim is released so the agent is not left holding a dead device.
-- **A failed emulator is out of rotation.** `hand_off` and `claim --any` skip it, so the queue does not hand it to each waiter in turn and fail every time. A named `claim` or `queue` of it is refused with the message above. Waiters queued for it by name are told the same, once, and stay queued.
+- **A failed emulator is out of rotation.** `hand_off` and `claim --any` skip it, so the queue does not hand it to each waiter in turn and fail every time. A named `claim` or `queue` of it is refused with the message above. Waiters queued for it by name are told the same, once, and their entries end.
 - **A desktop notification as well.** The agent may not pass the message on, and a waiter's background `--wait` may fail while nobody watches the thread. So devicelease also sends one notification when it writes the failed marker: `notify-send --app-name=devicelease --icon=devicelease --hint=string:desktop-entry:devicelease --urgency=critical "<id> failed to <what>" "<owner and project>. Log: <path>"`. The icon and the hidden `devicelease.desktop` entry come from `scripts/install-desktop-entry`. A hook may run without `DBUS_SESSION_BUS_ADDRESS`, so devicelease falls back to `unix:path=/run/user/<uid>/bus`. A missing `notify-send` or a failed send is logged and never fails the command. `DEVICELEASE_NOTIFY=off` turns it off, for tests.
 - **Only the user clears it.** `devicelease list` shows `failed: <what> (<age>), see <log>`. After fixing the cause, the user runs `devicelease claim <id> --boot --owner me`. A successful boot by the user removes the marker, and the queue moves again. Agent boots of a failed emulator are refused.
 
@@ -106,12 +117,12 @@ A boot that fails, a wipe that fails, or an `afterWipe` that exits non-zero is s
 
 `hand_off` today only hands out online devices. A wiped pool emulator is stopped, so a queue waiting for it would never move. The change:
 
-- `hand_off` also hands out stopped pool emulators. The claim is created as now, with a new `boot_pending` flag.
+- `hand_off` also hands out stopped pool emulators, and ones still stopping for their wipe. Running devices come first.
 - The waiter's side boots it:
   - `queue --wait`: the waiting command boots it after the hand-off and before it exits 0. Its "is free and now yours" line then has a serial.
   - `message` waiters (Claude Code in a terminal): the watcher boots it, then sends the message.
   - T3 Code `device_open`: the `pre-device-open` hook already boots a stopped emulator.
-  - `devicelease serial` and `exec` on a `boot_pending` claim say to run `devicelease claim <id> --boot`.
+  - `devicelease serial` and `exec` on a claim whose emulator is not running say to run `devicelease claim <id> --boot`, and so does the hand-off notice.
 - A direct `claim <id>` of a stopped pool emulator with no waiters works as today, with `--boot` running the wipe.
 
 ## Home project
@@ -136,7 +147,7 @@ A boot that fails, a wipe that fails, or an `afterWipe` that exits non-zero is s
    - `BRC_api36_magisk`: the wiped cold boot took 84 seconds and `provision-magisk.sh` 22 seconds, 106 seconds in total, well inside the `pre-device-open` hook's 300 seconds.
 1. **Guard.** The `inventory` target, the denial and `"ask"` texts, the pool-boot denial, and the `pre-write` hook. Useful on its own, before any wipe exists.
 2. **Wipe.** `wipeAfterUse`, the marker, stopping on claim end, the wiping boot with `afterWipe`, `devicelease wipe`, the `-wipe-data` check on `claim --boot` arguments, and the failed marker with its messages.
-3. **Hand-off to stopped emulators.** `boot_pending` and the three waiter paths.
+3. **Hand-off to stopped emulators.** The hand-off and the three waiter paths.
 4. **Home projects.** `--any` filtering and sorting, and queue priority.
 5. **Docs.** Help, README (including `scripts/install-desktop-entry` in the install steps), hook install.
 
