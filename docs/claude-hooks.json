@@ -20,6 +20,16 @@
             "timeout": 300
           }
         ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.local/bin/devicelease hook pre-write",
+            "timeout": 30
+          }
+        ]
       }
     ],
     "PostToolUse": [

@@ -18,6 +18,7 @@ HOOKS = {
     "PreToolUse": [
         ("Bash", "pre-bash"),
         ("mcp__t3-code__device_open", "pre-device-open", 300),
+        ("Write|Edit|MultiEdit|NotebookEdit", "pre-write"),
     ],
     "PostToolUse": [
         ("mcp__t3-code__device_close", "post-device-close"),

@@ -108,6 +108,7 @@ Without a policy file every device is allowed everywhere. `~/.config/devicelease
 - The global `deny` list wins. Then the project's `deny`, then the project's `allow` (or `defaults.allow` for a project not listed).
 - A project is the main repository root, so a git worktree follows the same entry as its repository. A path entry also covers the folders below it, and the longest matching path wins.
 - A `t3:<project id>` entry applies to every thread of that T3 Code project, in any worktree, and wins over path entries. `devicelease whoami` inside a T3 Code thread prints the key.
+- `wipeAfterUse` lists the pool: emulators that only boot through devicelease. In Bash, `emulator -avd` and `android emulator start` are refused for them, with a pointer to `devicelease claim <id> --boot`.
 - A repository can add a `.devicelease.json` at its root, with `allow` and `deny` in the same format. It can only narrow what the user policy allows, never widen it.
 
 ## Integrate
@@ -118,10 +119,12 @@ Without a policy file every device is allowed everywhere. `~/.config/devicelease
 scripts/install-claude-hooks
 ```
 
-This adds five hooks to `~/.claude/settings.json`, with a backup next to it. They apply to Claude Code in a terminal and inside T3 Code.
+This adds six hooks to `~/.claude/settings.json`, with a backup next to it. They apply to Claude Code in a terminal and inside T3 Code.
 
 - **Before every Bash command** the command line is checked for device use: `adb -s X`, `ANDROID_SERIAL=X`, `./gradlew connected*`/`install*`/`uninstall*`, `emulator -avd X`, `android ... --device=X`, `scrcpy` and `fastboot`, through pipes, `&&` chains, `if`/`for`/`while` bodies, `$(...)`, backticks, `sh -c`, and variables set earlier in the same command (`S=X; adb -s $S`). A command that uses a device the session has not claimed is blocked, and the message says what to run instead. A command that names no device (`adb shell`), or names it through a variable devicelease cannot read (`adb -s $SERIAL` with `SERIAL` set outside the command), is only allowed while the session's own device is the only one online. `$(devicelease serial)` is always allowed while the session holds exactly one device.
 - The check runs before any part of the command, so claim a device in its own command before using it.
+- **Changes to emulators and system images** are refused: `avdmanager create/delete/move avd`, `android emulator create/remove`, `android sdk install/remove/update` and `sdkmanager` for system images, `rootAVD`, and any `rm`, `mv`, `cp`, `ln`, `install`, `rsync`, `touch`, `truncate`, `tee`, `mkdir`, `sed -i` or `>` redirection that writes or removes files under the AVD folder or `<sdk>/system-images/`, including removing a parent folder of them. Reading them is fine. The message tells the agent to use an existing emulator or queue for a busy one. When the user asked for the change, the agent puts `DEVICELEASE_USER_REQUESTED=1` in front of the command, and the hook asks the user for approval instead (in T3 Code, the approval dialog).
+- **Write and Edit** into the AVD folder or `system-images/` are refused, with no approval path, because those tools cannot carry the prefix.
 - **An emulator boot in Bash** without `-gpu` (`emulator -avd X`, `android emulator start X`) is blocked, because the AVD's own setting is usually `auto`, which renders in software when the emulator runs headless. The message points to `devicelease claim X --boot`.
 - **T3 Code's `device_open`** claims the device it opens, and is blocked if another session holds it. **`device_close`** releases it. A stopped emulator is booted first, headless with the host GPU (`-gpu host -no-window -no-audio`), so T3 Code attaches to it instead of booting it with `-gpu auto`. This hook's timeout is 300 seconds to leave room for the boot.
 - **After every Bash or device tool call** the session's claims are refreshed.

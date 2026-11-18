@@ -59,6 +59,21 @@ WHEN THE DEVICE IS TAKEN
   If you would rather not wait, boot a stopped emulator (`devicelease claim <avd>
   --boot`) or ask the user.
 
+EMULATORS ON THIS MACHINE
+
+  The user decides which emulators and system images exist. Never create, delete,
+  move or edit an AVD, and never install, remove or patch a system image: no
+  avdmanager, `android emulator create/remove`, `android sdk`, sdkmanager or rootAVD
+  changes, and no file changes under the AVD folder or system-images/. Hooks refuse
+  them. Use an existing emulator, and wait in the queue when the one you want is busy.
+  Only when the user asked for such a change in this conversation, put
+  DEVICELEASE_USER_REQUESTED=1 in front of the command. That shows the user an
+  approval dialog.
+
+  Pool emulators (the user's policy lists them) only boot through
+  `devicelease claim <id> --boot`, never through `emulator -avd` or
+  `android emulator start`.
+
 COMMANDS
 
   list [--json] [--watch [--interval SECONDS]]

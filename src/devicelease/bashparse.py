@@ -18,8 +18,15 @@ IMPLICIT = "implicit"
 DYNAMIC = "dynamic"
 """The command names its device through the shell (`$SERIAL`), which cannot be read statically."""
 UNPARSEABLE = "unparseable"
+INVENTORY = "inventory"
+"""The command adds, removes or changes an emulator or a system image. `device` describes how."""
 
-QUICK_CHECK = re.compile(r"adb|gradle|emulator|android|agent-device|scrcpy|fastboot")
+USER_REQUESTED = "DEVICELEASE_USER_REQUESTED"
+"""Set to 1 in front of an inventory command when the user asked for the change."""
+
+QUICK_CHECK = re.compile(
+    r"adb|gradle|emulator|android|agent-device|scrcpy|fastboot|avd|sdkmanager|system-images",
+    re.IGNORECASE)
 OPERATORS = {";", "&", "&&", "|", "||", "|&", ";;", "(", ")", "\n"}
 SELF_SERIAL = {"$(devicelease serial)", "`devicelease serial`"}
 
@@ -51,6 +58,15 @@ WRAPPER_OPTIONS_WITH_VALUE = {
     "watch": {"-n", "-d"},
     "taskset": {"-c"},
 }
+REMOVING = {"rm", "unlink", "rmdir", "shred"}
+"""File commands whose every path argument is removed. Removing a parent of a guarded folder
+removes the folder too."""
+COPYING = {"cp", "ln", "install", "rsync"}
+"""File commands whose last path argument is the destination."""
+WRITING = {"touch", "truncate", "tee", "mkdir"}
+"""File commands that write every path argument."""
+REMOVES = re.compile(r"(^|[\s;&|(/])(rm|mv|unlink|rmdir|shred)\s")
+GLOB = re.compile(r"[*?\[]")
 HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1[^\n]*\n")
 
 
@@ -66,6 +82,8 @@ class Target:
     """The command starts an emulator."""
     gpu: str | None = None
     """The `-gpu` an emulator boot passes, or None when it leaves the choice to the AVD."""
+    user_requested: bool = False
+    """An inventory command carries `DEVICELEASE_USER_REQUESTED=1`."""
 
     @property
     def self_serial(self) -> bool:
@@ -107,19 +125,25 @@ def _simple_commands(text: str) -> list[list[str]]:
     return commands
 
 
-def _drop_redirections(words: list[str]) -> list[str]:
-    result, skip = [], False
+def _split_redirections(words: list[str]) -> tuple[list[str], list[str]]:
+    """Separates redirections from the command's words. Returns the words and the files the
+    command writes through `>`, `>>` and `&>`."""
+    result, written, skip = [], [], None
     for word in words:
-        if skip:
-            skip = False
+        if skip is not None:
+            if skip:
+                written.append(word)
+            skip = None
             continue
-        if re.fullmatch(r"\d*(>>?|<<?<?|>&|&>>?)", word):
-            skip = True
+        if match := re.fullmatch(r"\d*(>>?|<<?<?|>&|&>>?|>\|)", word):
+            skip = ">" in match.group(1) and match.group(1) != ">&"
             continue
-        if re.match(r"^\d*(>>?|<|&>)\S", word):
+        if match := re.match(r"^\d*(>>?|<|&>>?)(\S+)", word):
+            if ">" in match.group(1) and not match.group(2).startswith("&"):
+                written.append(match.group(2))
             continue
         result.append(word)
-    return result
+    return result, written
 
 
 def _skip_wrappers(words: list[str], env: dict[str, str]) -> list[str]:
@@ -280,9 +304,141 @@ def _flagged(tool: str, words: list[str], env: dict[str, str], line: str, *flags
     return []
 
 
-def _command_targets(words: list[str], shell_env: dict[str, str], depth: int) -> list[Target]:
+def _guarded_path(word: str, env: dict[str, str], guarded: tuple[str, ...],
+                  removes: bool) -> str | None:
+    """The path a command argument names, when it lies under a guarded folder. With `removes`,
+    a parent of a guarded folder counts too."""
+    if not guarded or not word or word == "-" or word.startswith("-"):
+        return None
+    path = os.path.expanduser(os.path.expandvars(_expand(word, env)))
+    if "$" in path or "`" in path:
+        return None
+    if not os.path.isabs(path):
+        if "PWD" not in env:
+            return None
+        path = os.path.join(env["PWD"], path)
+    path = os.path.normpath(path)
+    match = GLOB.search(path)
+    full = os.path.realpath(os.path.dirname(path[:match.start()]) if match else path)
+    for root in guarded:
+        root = os.path.realpath(root)
+        common = os.path.commonpath([full, root])
+        if common == root or (removes and common == full):
+            home = os.path.expanduser("~")
+            return "~" + path[len(home):] if path == home or path.startswith(home + os.sep) \
+                else path
+    return None
+
+
+def _file_changes(name: str, words: list[str], written: list[str], env: dict[str, str],
+                  guarded: tuple[str, ...]) -> list[str]:
+    """What a file command does to guarded folders, as "delete <path>" or "write <path>"."""
+    args = [w for w in words[1:] if not w.startswith("-")]
+    removed, changed = [], list(written)
+    if name in REMOVING:
+        removed = args
+    elif name == "mv" and len(args) >= 2:
+        removed, changed = args[:-1], changed + args[-1:]
+    elif name in COPYING and len(args) >= 2:
+        changed += args[-1:]
+    elif name in WRITING or (name == "sed" and any(
+            w.startswith(("-i", "--in-place")) for w in words[1:])):
+        changed += args
+    changes = []
+    for verb, paths, removes in (("delete", removed, True), ("write", changed, False)):
+        for path in paths:
+            if found := _guarded_path(path, env, guarded, removes):
+                changes.append(f"{verb} {found}")
+    return changes
+
+
+def _avdmanager(words: list[str]) -> list[str]:
+    for i, word in enumerate(words[1:-1], start=1):
+        if words[i + 1] != "avd" or word not in ("create", "delete", "move"):
+            continue
+        _, name = _option_value(words, "-n", "--name")
+        name = name or "(unnamed)"
+        if word == "create":
+            _, package = _option_value(words, "-k", "--package")
+            return [f"create AVD {name}" + (f" from {package}" if package else "")]
+        return [f"delete AVD {name}" if word == "delete" else f"move or rename AVD {name}"]
+    return []
+
+
+def _sdk_packages(verb: str, packages: list[str]) -> list[str]:
+    return [f"{verb} system image {p}" for p in packages if p.startswith("system-images")]
+
+
+def _sdkmanager(words: list[str]) -> list[str]:
+    args = words[1:]
+    if "--update" in args:
+        return ["update every SDK package, system images included"]
+    packages = [w for w in args if not w.startswith("-")]
+    return _sdk_packages("uninstall" if "--uninstall" in args else "install", packages)
+
+
+def _android_inventory(args: list[str]) -> list[str]:
+    positional = [a for a in args[2:] if not a.startswith("-")]
+    if args[:2] == ["emulator", "create"] and "--list-profiles" not in args:
+        return [f"create AVD" + (f" from profile {positional[0]}" if positional else "")]
+    if args[:2] == ["emulator", "remove"]:
+        return [f"delete AVD {positional[0] if positional else '(unnamed)'}"]
+    if args[:2] == ["sdk", "install"]:
+        return _sdk_packages("install", positional)
+    if args[:2] == ["sdk", "remove"]:
+        return _sdk_packages("uninstall", positional)
+    if args[:2] == ["sdk", "update"]:
+        if not positional:
+            return ["update every SDK package, system images included"]
+        return _sdk_packages("update", positional)
+    return []
+
+
+def _rootavd(words: list[str]) -> list[str]:
+    args = [w for w in words[1:] if not w.startswith("-")]
+    if args and args[0] == "ListAllAVDs":
+        return []
+    return ["patch a system image with rootAVD" + (f" ({args[0]})" if args else "")]
+
+
+def _inventory(words: list[str], written: list[str], env: dict[str, str],
+               guarded: tuple[str, ...], line: str) -> list[Target]:
+    name = os.path.basename(words[0])
+    if name in SHELLS and len(words) > 1 and os.path.basename(words[1]).startswith("rootAVD"):
+        words, name = words[1:], os.path.basename(words[1])
+    if name == "avdmanager":
+        changes = _avdmanager(words)
+    elif name == "sdkmanager":
+        changes = _sdkmanager(words)
+    elif name == "android":
+        changes = _android_inventory(
+            [w for w in words[1:] if not (w.startswith("--sdk") or w in ("-v", "--verbose"))])
+    elif name.startswith("rootAVD"):
+        changes = _rootavd(words)
+    else:
+        changes = []
+    changes += _file_changes(name, words, written, env, guarded)
+    requested = env.get(USER_REQUESTED) == "1"
+    return [Target(name, INVENTORY, change, command=line, user_requested=requested)
+            for change in changes]
+
+
+def _cd(words: list[str], shell_env: dict[str, str]) -> None:
+    target = words[1] if len(words) > 1 else "~"
+    path = os.path.expanduser(os.path.expandvars(_expand(target, shell_env)))
+    if target == "-" or "$" in path or "`" in path:
+        shell_env.pop("PWD", None)
+    elif os.path.isabs(path):
+        shell_env["PWD"] = os.path.normpath(path)
+    elif "PWD" in shell_env:
+        shell_env["PWD"] = os.path.normpath(os.path.join(shell_env["PWD"], path))
+
+
+def _command_targets(words: list[str], shell_env: dict[str, str], depth: int,
+                     guarded: tuple[str, ...] = ()) -> list[Target]:
     env = dict(shell_env)
-    words = _skip_wrappers(_drop_redirections(words), env)
+    words, written = _split_redirections(words)
+    words = _skip_wrappers(words, env)
     if not words:
         # A line of bare assignments sets shell variables for the commands after it.
         for key, value in env.items():
@@ -295,6 +451,15 @@ def _command_targets(words: list[str], shell_env: dict[str, str], depth: int) ->
     env = {k: _expand(v, shell_env) for k, v in env.items()}
     line = shlex.join(words)
     name = os.path.basename(words[0])
+    inventory = _inventory(words, written, env, guarded, line)
+    if name == "cd":
+        _cd(words, shell_env)
+        return inventory
+    return inventory + _device_targets(name, words, env, shell_env, depth, guarded, line)
+
+
+def _device_targets(name: str, words: list[str], env: dict[str, str], shell_env: dict[str, str],
+                    depth: int, guarded: tuple[str, ...], line: str) -> list[Target]:
     if name == "export":
         for word in words[1:]:
             if ASSIGNMENT.match(word):
@@ -311,7 +476,7 @@ def _command_targets(words: list[str], shell_env: dict[str, str], depth: int) ->
     if name in SHELLS:
         found, script = _option_value(words, "-c", "-lc", "-ic")
         if found and script and depth < 3:
-            return _targets(script, dict(env), depth + 1)
+            return _targets(script, dict(env), depth + 1, guarded)
         return []
     if name == "devicelease":
         return []
@@ -334,19 +499,36 @@ def _command_targets(words: list[str], shell_env: dict[str, str], depth: int) ->
     return []
 
 
-def _targets(text: str, env: dict[str, str], depth: int) -> list[Target]:
+def _targets(text: str, env: dict[str, str], depth: int,
+             guarded: tuple[str, ...] = ()) -> list[Target]:
     targets = []
     for words in _simple_commands(_strip_heredocs(text)):
-        targets.extend(_command_targets(words, env, depth))
+        targets.extend(_command_targets(words, env, depth, guarded))
     return targets
 
 
-def device_targets(command: str, env: dict[str, str] | None = None) -> list[Target]:
-    """`env` holds the variables the command starts with, such as an exported ANDROID_SERIAL."""
-    if not QUICK_CHECK.search(command):
+def _inside(path: str, roots: tuple[str, ...]) -> bool:
+    path = os.path.realpath(path)
+    return any(os.path.commonpath([path, os.path.realpath(r)]) == os.path.realpath(r)
+               for r in roots)
+
+
+def device_targets(command: str, env: dict[str, str] | None = None, cwd: str | None = None,
+                   guarded: tuple[str, ...] = ()) -> list[Target]:
+    """Finds the devices a command uses, and the changes it makes to emulators.
+
+    `env` holds the variables the command starts with, such as an exported ANDROID_SERIAL.
+    `cwd` is where it runs, and `guarded` the folders whose files make up emulators and system
+    images: a command that writes or removes files there is an inventory change.
+    """
+    if not (QUICK_CHECK.search(command) or (guarded and REMOVES.search(command))
+            or (cwd and _inside(cwd, guarded))):
         return []
+    env = dict(env or {})
+    if cwd:
+        env["PWD"] = cwd
     try:
-        return _targets(command, dict(env or {}), 0)
+        return _targets(command, env, 0, tuple(guarded))
     except ValueError:
         # Unbalanced quotes and the like: the command fails in the shell too, unless the parser
         # is wrong, so it is only flagged when it mentions a device tool as a word.

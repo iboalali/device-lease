@@ -9,8 +9,9 @@ import os
 import re
 import sys
 
-from devicelease import notify
-from devicelease.bashparse import EXPLICIT, IMPLICIT, Target, device_targets
+from devicelease import notify, paths
+from devicelease.bashparse import EXPLICIT, IMPLICIT, INVENTORY, USER_REQUESTED, Target, \
+    device_targets
 from devicelease.claims import Claim
 from devicelease.devices import EMULATOR, STOPPED, DiscoveryError, find
 from devicelease.lease import Lease, LeaseError
@@ -19,6 +20,17 @@ GUIDE = ("Run `devicelease list`, claim a device with `devicelease claim <id>` "
          "(or `devicelease claim --any`), then target it: `adb -s <serial>`, "
          "`android ... --device=<serial>`, or `devicelease exec -- ./gradlew ...`. "
          "`devicelease help` explains it all.")
+
+
+USE_EXISTING = ("Use an existing one: `devicelease claim --any` takes a free emulator, and "
+                "`devicelease queue <id> --wait` waits for a busy one (`devicelease list` shows "
+                "them all).")
+
+INVENTORY_DENIAL = ("Agents don't create, delete or change emulators or system images on this "
+                    "machine, and approval will most likely not come. " + USE_EXISTING + " Only "
+                    "if the user asked you for this change in this conversation, run the same "
+                    f"command again with `{USER_REQUESTED}=1` in front. That asks the user for "
+                    "approval.")
 
 
 HUB_EMULATOR_ARGS = ["-no-window", "-no-audio"]
@@ -30,12 +42,21 @@ def _lease(data: dict) -> Lease:
     return Lease.create(env=env, cwd=data.get("cwd"))
 
 
-def _deny(reason: str) -> None:
+def _decide(decision: str, reason: str) -> None:
     json.dump({"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
-        "permissionDecision": "deny",
+        "permissionDecision": decision,
         "permissionDecisionReason": reason,
     }}, sys.stdout)
+
+
+def _deny(reason: str) -> None:
+    _decide("deny", reason)
+
+
+def guarded_folders() -> tuple[str, ...]:
+    """The folders whose files make up the emulators and system images."""
+    return str(paths.avd_home()), str(paths.sdk_root() / "system-images")
 
 
 def handoff_notice(claim: Claim) -> str:
@@ -115,14 +136,43 @@ def _gpu_problem(target: Target) -> str | None:
             f"`-- -no-window -no-audio` for no window), or pass `-gpu` yourself.")
 
 
+def _pool_problem(lease: Lease, target: Target) -> str | None:
+    """A pool emulator only boots through devicelease, which wipes it when its last agent is done."""
+    if not target.boots or not target.device:
+        return None
+    try:
+        device = find(lease.devices, target.device)
+    except DiscoveryError:
+        device = None
+    name = device.name if device else None
+    if not lease.policy.in_pool(target.device, name):
+        return None
+    return (f"`{_shorten(target.command)}` boots {target.device}, a pool emulator, outside "
+            f"devicelease, which would skip its wipe. Boot it with "
+            f"`devicelease claim {target.device} --boot`.")
+
+
 def pre_bash(data: dict) -> None:
     command = (data.get("tool_input") or {}).get("command") or ""
     env = {"ANDROID_SERIAL": os.environ["ANDROID_SERIAL"]} if os.environ.get("ANDROID_SERIAL") else {}
-    targets = device_targets(command, env)
+    targets = device_targets(command, env, cwd=data.get("cwd"), guarded=guarded_folders())
     if not targets:
         return
+    changes = [t for t in targets if t.mode == INVENTORY]
+    targets = [t for t in targets if t.mode != INVENTORY]
     lease = _lease(data)
-    problems = [p for t in targets for p in (_judge(lease, t), _gpu_problem(t)) if p]
+    problems = [p for t in targets
+                for p in (_judge(lease, t), _gpu_problem(t), _pool_problem(lease, t)) if p]
+    unrequested = [t for t in changes if not t.user_requested]
+    if unrequested:
+        listed = "; ".join(dict.fromkeys(t.device for t in unrequested))
+        problems.append(f"This command would {listed}. {INVENTORY_DENIAL}")
+    if not problems and changes:
+        listed = "\n".join(f"- {c}" for c in dict.fromkeys(t.device for t in changes))
+        _decide("ask", f"devicelease: an agent in {paths.display_path(lease.project.root)} asks "
+                       f"to change the emulators on this machine:\n{listed}\nApprove only if "
+                       f"you asked for this.")
+        return
     if problems:
         if re.search(r"devicelease\s+claim\b", command):
             problems.append("This check runs before any part of the command, so a claim in the "
@@ -212,8 +262,24 @@ def session_end(data: dict) -> None:
     lease.release(everything=True)
 
 
+def pre_write(data: dict) -> None:
+    tool_input = data.get("tool_input") or {}
+    path = tool_input.get("file_path") or tool_input.get("notebook_path")
+    if not path:
+        return
+    full = os.path.realpath(os.path.join(data.get("cwd") or os.getcwd(), os.path.expanduser(path)))
+    for root in map(os.path.realpath, guarded_folders()):
+        if os.path.commonpath([full, root]) == root:
+            _deny(f"devicelease: {paths.display_path(full)} belongs to an emulator or a system "
+                  f"image. Agents don't create, delete or change emulators on this machine. "
+                  f"{USE_EXISTING} If the user asked for this change, tell them it has to be "
+                  f"made by hand.")
+            return
+
+
 HANDLERS = {
     "pre-bash": pre_bash,
+    "pre-write": pre_write,
     "pre-device-open": pre_device_open,
     "post-device-close": post_device_close,
     "heartbeat": heartbeat,

@@ -42,6 +42,8 @@ class HookTest(unittest.TestCase):
             DEVICELEASE_FAKE_DEVICES=str(self.devices_file),
             DEVICELEASE_STATE_DIR=str(root / "state"),
             DEVICELEASE_POLICY=str(root / "policy.json"),
+            ANDROID_AVD_HOME=str(root / "avd"),
+            ANDROID_HOME=str(root / "sdk"),
             DEVICELEASE_T3_DB=str(self.t3_db),
             DEVICELEASE_CLAUDE_SESSIONS=str(root / "sessions"),
             DEVICELEASE_WATCHER="off",
@@ -65,14 +67,21 @@ class HookTest(unittest.TestCase):
         self.assertEqual(result.stderr, "")
         return json.loads(result.stdout) if result.stdout else None
 
-    def bash(self, command, session="session-a"):
-        """Returns the deny reason, or None when the command may run."""
+    def decision(self, command, session="session-a"):
+        """Returns the decision and its reason, or None when the command may run."""
         output = self.hook("pre-bash", session, tool_name="Bash", tool_input={"command": command})
         if output is None:
             return None
         decision = output["hookSpecificOutput"]
-        self.assertEqual(decision["permissionDecision"], "deny")
-        return decision["permissionDecisionReason"]
+        return decision["permissionDecision"], decision["permissionDecisionReason"]
+
+    def bash(self, command, session="session-a"):
+        """Returns the deny reason, or None when the command may run."""
+        result = self.decision(command, session)
+        if result is None:
+            return None
+        self.assertEqual(result[0], "deny")
+        return result[1]
 
     def holders(self):
         result = self.cli("status", "--json")
@@ -143,6 +152,52 @@ class HookTest(unittest.TestCase):
                         "{ adb -s emulator-5554 shell; }"):
             with self.subTest(command=command):
                 self.assertIn("taken by session-b", self.bash(command))
+
+    def test_inventory_changes_are_denied(self):
+        avd = self.env["ANDROID_AVD_HOME"]
+        for command in ("avdmanager create avd -n x -k 'system-images;android-36;google_apis;x86_64'",
+                        "android emulator remove uitest_api37",
+                        "sdkmanager 'system-images;android-36;google_apis;x86_64'",
+                        f"rm -rf {avd}/uitest_api37.avd",
+                        f"echo hw.ramSize=4096 >> {avd}/uitest_api37.avd/config.ini"):
+            with self.subTest(command=command):
+                reason = self.bash(command)
+                self.assertIn("Agents don't create, delete or change emulators", reason)
+                self.assertIn("DEVICELEASE_USER_REQUESTED=1", reason)
+
+    def test_reading_the_avd_folder_passes(self):
+        avd = self.env["ANDROID_AVD_HOME"]
+        self.assertIsNone(self.bash(f"cat {avd}/uitest_api37.avd/config.ini"))
+        self.assertIsNone(self.bash("avdmanager list avd && sdkmanager --list"))
+
+    def test_user_requested_change_asks_the_user(self):
+        decision, reason = self.decision(
+            "DEVICELEASE_USER_REQUESTED=1 avdmanager delete avd -n uitest_api37")
+        self.assertEqual(decision, "ask")
+        self.assertIn("- delete AVD uitest_api37", reason)
+        self.assertIn("Approve only if you asked for this", reason)
+
+    def test_user_request_does_not_cover_other_problems(self):
+        reason = self.bash("DEVICELEASE_USER_REQUESTED=1 avdmanager delete avd -n x "
+                           "&& adb -s 0A1B2C3D4E shell ls")
+        self.assertIn("you have not claimed 0A1B2C3D4E", reason)
+
+    def test_pool_emulator_boots_only_through_devicelease(self):
+        Path(self.env["DEVICELEASE_POLICY"]).write_text(json.dumps({"wipeAfterUse": ["Pixel_*"]}))
+        self.cli("claim", "Pixel_6a")
+        reason = self.bash("emulator -avd Pixel_6a -gpu host")
+        self.assertIn("a pool emulator, outside devicelease", reason)
+        self.assertIn("devicelease claim Pixel_6a --boot", reason)
+
+    def test_writes_into_the_avd_folder_are_denied(self):
+        avd = self.env["ANDROID_AVD_HOME"]
+        output = self.hook("pre-write", tool_name="Edit",
+                           tool_input={"file_path": f"{avd}/uitest_api37.avd/config.ini"})
+        decision = output["hookSpecificOutput"]
+        self.assertEqual(decision["permissionDecision"], "deny")
+        self.assertIn("made by hand", decision["permissionDecisionReason"])
+        self.assertIsNone(self.hook("pre-write", tool_name="Write",
+                                    tool_input={"file_path": str(self.workdir / "notes.md")}))
 
     def test_booting_an_emulator_needs_a_claim(self):
         self.assertIn("you have not claimed Pixel_6a", self.bash("emulator -avd Pixel_6a"))

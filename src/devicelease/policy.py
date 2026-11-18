@@ -25,6 +25,8 @@ class Rules:
 class Policy:
     expiry_minutes: float = DEFAULT_EXPIRY_MINUTES
     deny: list[str] = field(default_factory=list)
+    wipe_after_use: list[str] = field(default_factory=list)
+    """The pool: emulators whose user data is wiped after each agent's claim."""
     projects: dict[str, Rules] = field(default_factory=dict)
     defaults: Rules = field(default_factory=lambda: Rules(allow=["*"]))
     repo: Rules | None = None
@@ -47,6 +49,10 @@ class Policy:
         if best_key is None:
             return None, self.defaults
         return best_key, self.projects[best_key]
+
+    def in_pool(self, device_id: str, name: str | None = None) -> bool:
+        names = [device_id] + ([name] if name else [])
+        return any(fnmatchcase(n, p) for p in self.wipe_after_use for n in names)
 
     def check(self, root: str, device_id: str, name: str | None = None,
               t3_project: str | None = None) -> str | None:
@@ -111,6 +117,7 @@ def load_policy(project: Project) -> Policy:
             raise PolicyError(f"{path}: expiryMinutes must be a positive number")
         policy.expiry_minutes = expiry
         policy.deny = _patterns(data.get("deny", []), f"{path}: deny")
+        policy.wipe_after_use = _patterns(data.get("wipeAfterUse", []), f"{path}: wipeAfterUse")
         projects = data.get("projects", {})
         if not isinstance(projects, dict):
             raise PolicyError(f"{path}: projects must be an object")
