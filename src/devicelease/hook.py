@@ -9,7 +9,7 @@ import os
 import re
 import sys
 
-from devicelease import notify, paths, wipe
+from devicelease import desktop, notify, paths, wipe
 from devicelease.bashparse import EXPLICIT, IMPLICIT, INVENTORY, USER_REQUESTED, Target, \
     device_targets
 from devicelease.claims import Claim
@@ -28,9 +28,11 @@ USE_EXISTING = ("Use an existing one: `devicelease claim --any` takes a free emu
 
 INVENTORY_DENIAL = ("Agents don't create, delete or change emulators or system images on this "
                     "machine, and approval will most likely not come. " + USE_EXISTING + " Only "
-                    "if the user asked you for this change in this conversation, run the same "
-                    f"command again with `{USER_REQUESTED}=1` in front. That asks the user for "
-                    "approval.")
+                    "if the user asked you for this exact change, run the same command again "
+                    f"with `{USER_REQUESTED}=1` in front. That asks the user for approval and "
+                    "pauses your work until they answer, which can take hours. An older request "
+                    "about another emulator, or one with the same name, does not count. If you "
+                    "made an emulator change by mistake, tell the user and leave it as it is.")
 
 
 HUB_EMULATOR_ARGS = ["-no-window", "-no-audio"]
@@ -171,9 +173,11 @@ def pre_bash(data: dict) -> None:
         problems.append(f"This command would {listed}. {INVENTORY_DENIAL}")
     if not problems and changes:
         listed = "\n".join(f"- {c}" for c in dict.fromkeys(t.device for t in changes))
-        _decide("ask", f"devicelease: an agent in {paths.display_path(lease.project.root)} asks "
-                       f"to change the emulators on this machine:\n{listed}\nApprove only if "
-                       f"you asked for this.")
+        project = paths.display_path(lease.project.root)
+        _decide("ask", f"devicelease: an agent in {project} asks to change the emulators on "
+                       f"this machine:\n{listed}\nApprove only if you asked for this.")
+        desktop.notify("An agent waits for emulator approval",
+                       f"{project}\n{listed}\nIt pauses until you approve or deny.")
         return
     if problems:
         if re.search(r"devicelease\s+claim\b", command):

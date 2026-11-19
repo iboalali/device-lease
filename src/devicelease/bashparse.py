@@ -447,7 +447,7 @@ def _command_targets(words: list[str], shell_env: dict[str, str], depth: int,
         return []
     # Bash expands arguments before a prefix assignment (`S=x adb -s $S`) takes effect, so only
     # variables from earlier commands apply.
-    words = [words[0], *(_expand(w, shell_env) for w in words[1:])]
+    words = [_expand(w, shell_env) for w in words]
     env = {k: _expand(v, shell_env) for k, v in env.items()}
     line = shlex.join(words)
     name = os.path.basename(words[0])

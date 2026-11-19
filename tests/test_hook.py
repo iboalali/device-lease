@@ -49,6 +49,13 @@ class HookTest(unittest.TestCase):
             DEVICELEASE_WATCHER="off",
             DEVICELEASE_CLAUDE="false",
         )
+        bin_dir = root / "bin"
+        bin_dir.mkdir()
+        self.notifications = root / "notify-send.log"
+        notify_send = bin_dir / "notify-send"
+        notify_send.write_text(f'#!/bin/sh\necho "$@" >> {self.notifications}\n')
+        notify_send.chmod(0o755)
+        self.env["PATH"] = f"{bin_dir}{os.pathsep}{self.env['PATH']}"
 
     def set_devices(self, devices):
         self.devices_file.write_text(json.dumps(devices))
@@ -159,11 +166,14 @@ class HookTest(unittest.TestCase):
                         "android emulator remove uitest_api37",
                         "sdkmanager 'system-images;android-36;google_apis;x86_64'",
                         f"rm -rf {avd}/uitest_api37.avd",
+                        "A=~/Android/Sdk/cmdline-tools/latest/bin/avdmanager; "
+                        "echo no | $A create avd -n p -k 'system-images;android-37.0;google_apis'",
                         f"echo hw.ramSize=4096 >> {avd}/uitest_api37.avd/config.ini"):
             with self.subTest(command=command):
                 reason = self.bash(command)
                 self.assertIn("Agents don't create, delete or change emulators", reason)
                 self.assertIn("DEVICELEASE_USER_REQUESTED=1", reason)
+        self.assertFalse(self.notifications.exists())
 
     def test_reading_the_avd_folder_passes(self):
         avd = self.env["ANDROID_AVD_HOME"]
@@ -176,6 +186,7 @@ class HookTest(unittest.TestCase):
         self.assertEqual(decision, "ask")
         self.assertIn("- delete AVD uitest_api37", reason)
         self.assertIn("Approve only if you asked for this", reason)
+        self.assertIn("An agent waits for emulator approval", self.notifications.read_text())
 
     def test_user_request_does_not_cover_other_problems(self):
         reason = self.bash("DEVICELEASE_USER_REQUESTED=1 avdmanager delete avd -n x "

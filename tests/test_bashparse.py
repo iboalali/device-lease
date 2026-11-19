@@ -160,6 +160,8 @@ class BashParseTest(unittest.TestCase):
             ("D=/data/avd; rm -rf $D/p.avd", ["delete /data/avd/p.avd"]),
             ("if true; then rm -rf /data/avd/p.avd; fi", ["delete /data/avd/p.avd"]),
             ("sh -c 'avdmanager delete avd -n p'", ["delete AVD p"]),
+            ("A=/sdk/bin/avdmanager; echo no | $A create avd -n p -k i", ["create AVD p from i"]),
+            ("M=avdmanager; ${M} delete avd -n p", ["delete AVD p"]),
         ]
         for command, expected in cases:
             with self.subTest(command=command):
