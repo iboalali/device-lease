@@ -222,7 +222,9 @@ def pre_device_open(data: dict) -> None:
             lease.claim(device_id, t3_device=claim.serial)
     except (LeaseError, DiscoveryError) as e:
         message = str(e).rstrip(".") + "."
-        if "devicelease list" not in message:
+        if boot and f"`devicelease claim {device_id} --no-snapshot" in message:
+            message += " Run that in Bash, then call device_open again."
+        elif "devicelease list" not in message:
             message += " Run `devicelease list` to see free devices."
         _deny(f"devicelease: {message}")
         return

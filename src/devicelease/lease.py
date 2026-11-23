@@ -437,7 +437,7 @@ class Lease:
                                  f"{wipe.STOP_TIMEOUT}s; try again shortly")
             try:
                 serial = boot_emulator(device.id, wipe.log_path(device.id),
-                                       snapshot=snapshot and not pool,
+                                       snapshot=snapshot and not pool, gpu_hint=not pool,
                                        extra_args=[*emulator_args,
                                                    *(["-wipe-data"] if wiping else [])])
             except DiscoveryError as e:

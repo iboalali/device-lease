@@ -15,7 +15,8 @@ USE A DEVICE
        claims a stopped emulator and starts it with the host GPU. `--no-snapshot`
        instead of `--boot` cold boots it, without loading or saving the Quick Boot
        snapshot. Arguments after `--` go to the emulator and imply `--boot`:
-       `devicelease claim <avd> -- -gpu auto` boots without the host GPU.
+       `devicelease claim <avd> -- -no-window -no-audio` boots it headless.
+       If a boot with the host GPU crashes, cold boot it with `--no-snapshot`.
        Run the claim as its own command. Hooks check a whole command before any part
        of it runs, so `devicelease claim X && adb -s X ...` is still blocked.
   3. Name the device in every command:

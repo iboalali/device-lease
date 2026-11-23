@@ -168,18 +168,30 @@ def find(devices: list[Device], target: str) -> Device | None:
     return None
 
 
+def _host_gpu_hint(avd: str, cold: bool) -> str:
+    # Loading a Quick Boot snapshot can crash the host GPU renderer while a cold boot with the
+    # same GPU works. Software rendering is what the Bash hook blocks, so it is the last resort.
+    if not cold:
+        return (f". A Quick Boot snapshot can crash the host GPU renderer, so cold boot it with "
+                f"the host GPU: `devicelease claim {avd} --no-snapshot`")
+    return (f". The cold boot failed with the host GPU too. As a last resort, "
+            f"`devicelease claim {avd} --no-snapshot -- -gpu swiftshader_indirect` boots it "
+            f"with software rendering, which is slow")
+
+
 def boot_emulator(avd: str, log_path: Path, timeout: float = 240, snapshot: bool = True,
-                  extra_args: list[str] = ()) -> str:
+                  extra_args: list[str] = (), gpu_hint: bool = True) -> str:
     """Starts an emulator, waits until Android finished booting and returns its serial.
 
     Without `snapshot` it cold boots and neither loads nor saves the Quick Boot snapshot.
     `extra_args` go to the emulator as they are. It renders with the host GPU unless they
-    pass their own `-gpu`.
+    pass their own `-gpu`. With `gpu_hint`, a failed host GPU boot says how to boot it instead.
     """
     emulator = paths.emulator_path()
     if emulator is None:
         raise DiscoveryError("emulator not found; set ANDROID_HOME or DEVICELEASE_EMULATOR")
     default_gpu = "-gpu" not in extra_args
+    cold = not snapshot or any(a in extra_args for a in ("-no-snapshot", "-no-snapshot-load"))
     command = [emulator, "-avd", avd, *(["-gpu", "host"] if default_gpu else []),
                *([] if snapshot else ["-no-snapshot"]), *extra_args]
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -193,8 +205,8 @@ def boot_emulator(avd: str, log_path: Path, timeout: float = 240, snapshot: bool
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if process.poll() is not None:
-            hint = (". If the host GPU is the problem, boot it with `-- -gpu auto`"
-                    if default_gpu and process.returncode != 0 else "")
+            hint = (_host_gpu_hint(avd, cold)
+                    if gpu_hint and default_gpu and process.returncode != 0 else "")
             raise DiscoveryError(f"emulator {avd} exited with code {process.returncode} before "
                                  f"it finished booting; see {log_path}{hint}")
         for serial, state, _ in _adb_devices():

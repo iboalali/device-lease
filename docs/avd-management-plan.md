@@ -4,7 +4,7 @@
 
 Built on 2026-11-18, in five commits: the guard (Phase 1), the wipe (Phase 2), the hand-off to stopped emulators (Phase 3), home projects (Phase 4) and the docs (Phase 5). Where the build differs from the first version of this plan, the sections below describe the build:
 
-- Only pool emulators are marked failed. A failed boot of any other AVD behaves as before, so the "boot it with `-- -gpu auto`" hint still applies to the user's own AVDs.
+- Only pool emulators are marked failed. A failed boot of any other AVD behaves as before, so the hint to cold boot it with the host GPU (`devicelease claim <avd> --no-snapshot`) still applies to the user's own AVDs.
 - A waiter queued by name for a failed emulator is told once, and its entry ends, rather than staying queued: a background `--wait` can only tell by exiting.
 - A hand-off has no `boot_pending` flag. The waiter's side checks whether the emulator runs, and boots it when it does not.
 - `queue --any` can receive a stopped pool emulator, booted for it. Running devices come first.

@@ -168,6 +168,7 @@ class WipeTest(unittest.TestCase):
         (self.root / "emulator-fails").touch()
         result = self.cli("claim", "pool_a", "--boot")
         self.assertIn("Tell the user that pool_a failed to boot", result.stderr)
+        self.assertNotIn("swiftshader", result.stderr)
         self.assertEqual(self.failed("pool_a")["what"], "boot")
 
     def test_failed_boot_of_another_emulator_is_not_marked(self):

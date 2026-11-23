@@ -50,14 +50,28 @@ class BootEmulatorTest(unittest.TestCase):
     def test_exit_before_boot_fails_right_away(self):
         message = self.exit_early(0)
         self.assertIn("exited with code 0 before it finished booting", message)
-        self.assertNotIn("-gpu auto", message)
+        self.assertNotIn("devicelease claim", message)
 
-    def test_failed_host_gpu_boot_suggests_another_gpu(self):
-        self.assertIn("-- -gpu auto", self.exit_early(1))
+    def test_failed_snapshot_boot_suggests_a_cold_boot_with_the_host_gpu(self):
+        message = self.exit_early(-11)
+        self.assertIn("Pixel_6a.log", message)
+        self.assertIn("`devicelease claim Pixel_6a --no-snapshot`", message)
+        self.assertNotIn("-gpu", message)
+
+    def test_failed_cold_boot_suggests_software_rendering_as_last_resort(self):
+        for kwargs in ({"snapshot": False}, {"extra_args": ["-no-snapshot"]}):
+            message = self.exit_early(-11, **kwargs)
+            self.assertIn("Pixel_6a.log", message)
+            self.assertIn("last resort", message)
+            self.assertIn("software rendering", message)
+            self.assertIn("-- -gpu swiftshader_indirect", message)
+
+    def test_failed_boot_without_gpu_hint_has_no_gpu_hint(self):
+        self.assertNotIn("devicelease claim", self.exit_early(1, gpu_hint=False))
 
     def test_failed_boot_with_own_gpu_has_no_gpu_hint(self):
         own_gpu = ["-gpu", "swiftshader_indirect"]
-        self.assertNotIn("-gpu auto", self.exit_early(1, extra_args=own_gpu))
+        self.assertNotIn("devicelease claim", self.exit_early(1, extra_args=own_gpu))
 
 
 if __name__ == "__main__":

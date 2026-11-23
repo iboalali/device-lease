@@ -232,7 +232,11 @@ class HookTest(unittest.TestCase):
         self.env["DEVICELEASE_EMULATOR"] = str(emulator)
         output = self.hook("pre-device-open", tool_name="mcp__t3-code__device_open",
                            tool_input={"deviceId": "Pixel_6a"})
-        self.assertIn("exited with code 1", output["hookSpecificOutput"]["permissionDecisionReason"])
+        reason = output["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("exited with code 1", reason)
+        self.assertIn("`devicelease claim Pixel_6a --no-snapshot`", reason)
+        self.assertIn("then call device_open again", reason)
+        self.assertNotIn("-gpu auto", reason)
         self.assertEqual(args_file.read_text().split(),
                          ["-avd", "Pixel_6a", "-gpu", "host", "-no-window", "-no-audio"])
         self.assertEqual(self.holders(), {})
